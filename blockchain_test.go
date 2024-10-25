@@ -1,0 +1,60 @@
+package blockchain
+
+import (
+	"blockchain/executor"
+	"blockchain/transactions"
+	"testing"
+)
+
+func TestExecutorTransferTransaction1(t *testing.T) {
+	startState := testAccountState{
+		executor.AccountValue{Name: "A", Balance: 20},
+		executor.AccountValue{Name: "B", Balance: 30},
+		executor.AccountValue{Name: "C", Balance: 40},
+	}
+	block := executor.Block{
+		Transactions: []executor.Transaction{
+			transactions.Transfer{From: "A", To: "B", Value: 5},
+			transactions.Transfer{From: "B", To: "C", Value: 10},
+			transactions.Transfer{From: "B", To: "C", Value: 30}, // should fail
+		},
+	}
+	expectedUpdateState := []executor.AccountValue{
+		{Name: "A", Balance: 15},
+		{Name: "B", Balance: 25},
+		{Name: "C", Balance: 50},
+	}
+	assertExecution(t, expectedUpdateState, block, startState, executor.NewSerialExecutor())
+}
+
+type testAccountState []executor.AccountValue
+
+func (s testAccountState) GetAccount(name string) executor.AccountValue {
+	for _, v := range s {
+		if v.Name == name {
+			return v
+		}
+	}
+	return executor.AccountValue{Name: name, Balance: 0}
+}
+
+func assertExecution(
+	t *testing.T,
+	expectedStateUpdate []executor.AccountValue,
+	block executor.Block,
+	startState executor.AccountState,
+	executor executor.BlockExecutor,
+) {
+	actualStateUpdate, err := executor.ExecuteBlock(block, startState)
+	if err != nil {
+		t.Error(err)
+	}
+	for i, v := range expectedStateUpdate {
+		if v.Name != actualStateUpdate[i].Name {
+			t.Errorf("name assertion failed -> expected: %s, actual: %s", v.Name, actualStateUpdate[i].Name)
+		}
+		if v.Balance != actualStateUpdate[i].Balance {
+			t.Errorf("balance assertion failed -> expected: %s, actual: %s", v.Name, actualStateUpdate[i].Name)
+		}
+	}
+}
