@@ -27,6 +27,28 @@ func TestExecutorTransferTransaction1(t *testing.T) {
 	assertExecution(t, expectedUpdateState, block, startState, executor.NewSerialExecutor())
 }
 
+func TestExecutorTransferTransaction2(t *testing.T) {
+	startState := testAccountState{
+		executor.AccountValue{Name: "A", Balance: 10},
+		executor.AccountValue{Name: "B", Balance: 20},
+		executor.AccountValue{Name: "C", Balance: 30},
+		executor.AccountValue{Name: "D", Balance: 40},
+	}
+	block := executor.Block{
+		Transactions: []executor.Transaction{
+			transactions.Transfer{From: "A", To: "B", Value: 5},
+			transactions.Transfer{From: "C", To: "D", Value: 10},
+		},
+	}
+	expectedUpdateState := []executor.AccountValue{
+		{Name: "A", Balance: 5},
+		{Name: "B", Balance: 25},
+		{Name: "C", Balance: 20},
+		{Name: "D", Balance: 50},
+	}
+	assertExecution(t, expectedUpdateState, block, startState, executor.NewSerialExecutor())
+}
+
 type testAccountState []executor.AccountValue
 
 func (s testAccountState) GetAccount(name string) executor.AccountValue {
