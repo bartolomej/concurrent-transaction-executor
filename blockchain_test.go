@@ -49,12 +49,13 @@ func assertExecution(
 	if err != nil {
 		t.Error(err)
 	}
-	for i, v := range expectedStateUpdate {
-		if v.Name != actualStateUpdate[i].Name {
-			t.Errorf("name assertion failed -> expected: %s, actual: %s", v.Name, actualStateUpdate[i].Name)
+	for i, expected := range expectedStateUpdate {
+		actual := actualStateUpdate[i]
+		if expected.Name != actual.Name {
+			t.Errorf("name assertion failed -> expected: %s, actual: %s", expected.Name, actual.Name)
 		}
-		if v.Balance != actualStateUpdate[i].Balance {
-			t.Errorf("balance assertion failed -> expected: %s, actual: %s", v.Name, actualStateUpdate[i].Name)
+		if expected.Balance != actual.Balance {
+			t.Errorf("balance assertion failed -> expected: %d, actual: %d", expected.Balance, actual.Balance)
 		}
 	}
 }
