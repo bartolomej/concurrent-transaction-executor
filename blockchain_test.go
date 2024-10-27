@@ -24,7 +24,8 @@ func TestExecutorTransferTransaction1(t *testing.T) {
 		{Name: "B", Balance: 25},
 		{Name: "C", Balance: 50},
 	}
-	assertExecution(t, expectedUpdateState, block, startState, executor.NewSerialExecutor())
+	//assertExecution(t, expectedUpdateState, block, startState, executor.NewSerialExecutor())
+	assertExecution(t, expectedUpdateState, block, startState, executor.NewParallelExecutor(3))
 }
 
 func TestExecutorTransferTransaction2(t *testing.T) {

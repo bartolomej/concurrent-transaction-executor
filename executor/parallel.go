@@ -10,26 +10,34 @@ type ParallelExecutor struct {
 	NWorkers int
 }
 
-func NewParallelExecutor() *ParallelExecutor {
-	return &ParallelExecutor{}
+func NewParallelExecutor(nWorkers int) *ParallelExecutor {
+	return &ParallelExecutor{NWorkers: nWorkers}
 }
 
 func (e *ParallelExecutor) ExecuteBlock(block Block, state AccountState) ([]AccountValue, error) {
-	workers := e.initWorkers(block.Transactions)
+	workers := e.initWorkers(block.Transactions, state)
+	executionReports := make(chan executionReport)
+
 	var wg sync.WaitGroup
 	for _, worker := range workers {
 		wg.Add(1)
-		w := worker
-		go func() {
-			// TODO: Take into account executionReport
-			w.execute()
+		go func(w executionWorker) {
+			w.execute(executionReports)
 			wg.Done()
-		}()
+		}(worker)
+	}
+	go func() {
+		wg.Wait()
+		close(executionReports)
+	}()
+
+	for report := range executionReports {
+		fmt.Printf("execution report %s\n", report)
 	}
 	panic("not implemented")
 }
 
-func (e *ParallelExecutor) initWorkers(transactions []Transaction) []executionWorker {
+func (e *ParallelExecutor) initWorkers(transactions []Transaction, state AccountState) []executionWorker {
 	var workers []executionWorker
 	l := e.NWorkers
 	n := len(transactions)
@@ -39,6 +47,7 @@ func (e *ParallelExecutor) initWorkers(transactions []Transaction) []executionWo
 		workers = append(workers, executionWorker{
 			firstTxIndex: start,
 			transactions: transactions[start:end],
+			state:        state,
 		})
 	}
 	return workers
@@ -62,8 +71,14 @@ type executionReport struct {
 	transaction Transaction
 }
 
-func (e executionWorker) execute() []executionReport {
-	var reports []executionReport
+func (r executionReport) String() string {
+	return fmt.Sprintf(
+		"executionReport{index: %d, reads: %d, updates: %d}",
+		r.index, len(r.reads), len(r.updates),
+	)
+}
+
+func (e executionWorker) execute(executionReports chan executionReport) {
 	index := e.firstTxIndex
 	for _, transaction := range e.transactions {
 		proxy := newStateProxy(e.state)
@@ -72,15 +87,14 @@ func (e executionWorker) execute() []executionReport {
 			fmt.Printf("skipping failed transaction: %s\n", err)
 			break
 		}
-		reports = append(reports, executionReport{
+		executionReports <- executionReport{
 			index:       index,
 			updates:     updates,
 			reads:       proxy.reads,
 			transaction: transaction,
-		})
+		}
 		index++
 	}
-	return reports
 }
 
 type stateProxy struct {
@@ -88,11 +102,11 @@ type stateProxy struct {
 	state AccountState
 }
 
-func newStateProxy(state AccountState) stateProxy {
-	return stateProxy{state: state}
+func newStateProxy(state AccountState) *stateProxy {
+	return &stateProxy{state: state}
 }
 
-func (s stateProxy) GetAccount(name string) AccountValue {
+func (s *stateProxy) GetAccount(name string) AccountValue {
 	s.reads = append(s.reads, accountRead{
 		name:      name,
 		timestamp: time.Now().Unix(),
