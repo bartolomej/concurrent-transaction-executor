@@ -51,7 +51,7 @@ func (e *Executor) ExecuteBlock(block executor.Block, state executor.AccountStat
 // given an ordered (by index) list of execution reports
 func buildDependencyDag(reports []executionReport) *dependencyDag {
 	nodesByUpdate := make(map[string]map[int]bool)
-	dag := newDependencyDag()
+	dag := newDependencyDag(nil)
 	for _, report := range reports {
 		var dependencies []int
 		for _, read := range report.reads {

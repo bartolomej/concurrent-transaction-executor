@@ -2,6 +2,7 @@ package parallel
 
 import (
 	"blockchain/executor"
+	"slices"
 	"testing"
 )
 
@@ -33,22 +34,49 @@ func TestDag1(t *testing.T) {
 
 	actual := buildDependencyDag(orderedReports)
 
-	expected := &dependencyDag{nodes: map[int]*dependencyNode{
-		0: {
+	expected := newDependencyDag([]*dependencyNode{
+		{
 			Id:           0,
 			Dependencies: []int{},
 		},
-		1: {
+		{
 			Id:           1,
 			Dependencies: []int{0},
 		},
-		2: {
+		{
 			Id:           2,
 			Dependencies: []int{0, 1},
 		},
-	}}
+	})
 
 	assertEqual(t, actual, expected)
+}
+
+func TestTopologicalOrder1(t *testing.T) {
+	dag := newDependencyDag([]*dependencyNode{
+		{
+			Id:           0,
+			Dependencies: []int{},
+		},
+		{
+			Id:           1,
+			Dependencies: []int{0},
+		},
+		{
+			Id:           2,
+			Dependencies: []int{0, 1},
+		},
+		{
+			Id:           3,
+			Dependencies: []int{2},
+		},
+	})
+
+	actual := dag.topologicalOrder()
+	expected := []int{0, 1, 2, 3}
+	if !slices.Equal(actual, expected) {
+		t.Errorf("actual %v != expected %v", actual, expected)
+	}
 }
 
 func assertEqual(t *testing.T, actual, expected *dependencyDag) {

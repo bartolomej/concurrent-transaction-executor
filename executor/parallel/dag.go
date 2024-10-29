@@ -10,18 +10,84 @@ import (
 // dependencyDag is a Directed Acyclic Graph that is not necessarily connected.
 type dependencyDag struct {
 	nodes map[int]*dependencyNode
+	// inEdgeLookup tracks incoming node connections by node ID
+	inEdgeLookup map[int]map[int]bool
 }
 
-func newDependencyDag() *dependencyDag {
-	return &dependencyDag{nodes: make(map[int]*dependencyNode)}
+func newDependencyDag(nodes []*dependencyNode) *dependencyDag {
+	dag := &dependencyDag{
+		nodes:        make(map[int]*dependencyNode),
+		inEdgeLookup: make(map[int]map[int]bool),
+	}
+
+	for _, node := range nodes {
+		dag.add(node)
+	}
+
+	return dag
 }
 
+// add inserts the node in the graph
+// once a node is added is should not be updated or er-added
 func (dag *dependencyDag) add(node *dependencyNode) {
+	_, exists := dag.nodes[node.Id]
+	if exists {
+		panic("cannot add the same node twice")
+	}
+
 	dag.nodes[node.Id] = node
+
+	dag.updateLookups(node)
+}
+
+func (dag *dependencyDag) updateLookups(node *dependencyNode) {
+	for _, dep := range node.Dependencies {
+		_, ok := dag.inEdgeLookup[dep]
+		if !ok {
+			dag.inEdgeLookup[dep] = make(map[int]bool)
+		}
+		dag.inEdgeLookup[dep][node.Id] = true
+	}
 }
 
 func (dag *dependencyDag) lookup(id int) *dependencyNode {
 	return dag.nodes[id]
+}
+
+func (dag *dependencyDag) dependants(id int) []int {
+	var dependantsIds []int
+
+	for id, _ := range dag.inEdgeLookup[id] {
+		dependantsIds = append(dependantsIds, id)
+	}
+
+	return dependantsIds
+}
+
+func (dag *dependencyDag) topologicalOrder() []int {
+	var orderedIds []int
+	visitedIds := make(map[int]bool)
+
+	// Find all nodes without dependencies
+	for id, node := range dag.nodes {
+		if len(node.Dependencies) == 0 {
+			orderedIds = append(orderedIds, id)
+			visitedIds[id] = true
+		}
+	}
+
+	i := 0
+	for i < len(orderedIds) {
+		for _, depId := range dag.dependants(orderedIds[i]) {
+			if !visitedIds[depId] {
+				orderedIds = append(orderedIds, depId)
+				visitedIds[depId] = true
+			}
+		}
+		i++
+	}
+
+	return orderedIds
 }
 
 func (dag *dependencyDag) String() string {
