@@ -2,6 +2,8 @@ package blockchain
 
 import (
 	"blockchain/executor"
+	"blockchain/executor/parallel"
+	"blockchain/executor/serial"
 	"blockchain/transactions"
 	"testing"
 )
@@ -24,8 +26,8 @@ func TestExecutorTransferTransaction1(t *testing.T) {
 		{Name: "B", Balance: 25},
 		{Name: "C", Balance: 50},
 	}
-	//assertExecution(t, expectedUpdateState, block, startState, executor.NewSerialExecutor())
-	assertExecution(t, expectedUpdateState, block, startState, executor.NewParallelExecutor(3))
+	//assertExecution(t, expectedUpdateState, block, startState, executor.NewExecutor())
+	assertExecution(t, expectedUpdateState, block, startState, parallel.NewExecutor(3))
 }
 
 func TestExecutorTransferTransaction2(t *testing.T) {
@@ -47,7 +49,7 @@ func TestExecutorTransferTransaction2(t *testing.T) {
 		{Name: "C", Balance: 20},
 		{Name: "D", Balance: 50},
 	}
-	assertExecution(t, expectedUpdateState, block, startState, executor.NewSerialExecutor())
+	assertExecution(t, expectedUpdateState, block, startState, serial.NewExecutor())
 }
 
 type testAccountState []executor.AccountValue

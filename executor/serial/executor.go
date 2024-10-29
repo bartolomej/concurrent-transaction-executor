@@ -1,17 +1,18 @@
-package executor
+package serial
 
 import (
+	"blockchain/executor"
 	"fmt"
 	"sort"
 )
 
-type SerialExecutor struct{}
+type Executor struct{}
 
-func NewSerialExecutor() *SerialExecutor {
-	return &SerialExecutor{}
+func NewExecutor() *Executor {
+	return &Executor{}
 }
 
-func (e *SerialExecutor) ExecuteBlock(block Block, startState AccountState) ([]AccountValue, error) {
+func (e *Executor) ExecuteBlock(block executor.Block, startState executor.AccountState) ([]executor.AccountValue, error) {
 	blockState := newExecutorState(startState)
 
 	for i, tx := range block.Transactions {
@@ -28,27 +29,27 @@ func (e *SerialExecutor) ExecuteBlock(block Block, startState AccountState) ([]A
 
 type executorState struct {
 	uncommitedBalancesByName map[string]uint
-	startState               AccountState
+	startState               executor.AccountState
 }
 
-func newExecutorState(startState AccountState) *executorState {
+func newExecutorState(startState executor.AccountState) *executorState {
 	return &executorState{
 		startState:               startState,
 		uncommitedBalancesByName: make(map[string]uint),
 	}
 }
 
-func (s *executorState) GetAccount(name string) AccountValue {
+func (s *executorState) GetAccount(name string) executor.AccountValue {
 	_, ok := s.uncommitedBalancesByName[name]
 
 	if !ok {
 		s.initAccount(name)
 	}
 
-	return AccountValue{Name: name, Balance: s.uncommitedBalancesByName[name]}
+	return executor.AccountValue{Name: name, Balance: s.uncommitedBalancesByName[name]}
 }
 
-func (s *executorState) ApplyUpdates(updates []AccountUpdate) {
+func (s *executorState) ApplyUpdates(updates []executor.AccountUpdate) {
 	for _, u := range updates {
 		_, ok := s.uncommitedBalancesByName[u.Name]
 		if !ok {
@@ -62,10 +63,10 @@ func (s *executorState) initAccount(name string) {
 	s.uncommitedBalancesByName[name] = s.startState.GetAccount(name).Balance
 }
 
-func (s *executorState) UpdatedAccountValues() []AccountValue {
-	var updatedValues []AccountValue
+func (s *executorState) UpdatedAccountValues() []executor.AccountValue {
+	var updatedValues []executor.AccountValue
 	for k, v := range s.uncommitedBalancesByName {
-		updatedValues = append(updatedValues, AccountValue{
+		updatedValues = append(updatedValues, executor.AccountValue{
 			Name:    k,
 			Balance: v,
 		})
