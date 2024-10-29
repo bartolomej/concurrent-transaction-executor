@@ -5,19 +5,20 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // dependencyDag is a Directed Acyclic Graph that is not necessarily connected.
 type dependencyDag struct {
 	nodes map[int]*dependencyNode
-	// inEdgeLookup tracks incoming node connections by node ID
-	inEdgeLookup map[int]map[int]bool
+	// dependantsById tracks a list of dependant nodes (those who depend on the dependency node) for every node ID
+	dependantsById map[int]map[int]bool
 }
 
 func newDependencyDag(nodes []*dependencyNode) *dependencyDag {
 	dag := &dependencyDag{
-		nodes:        make(map[int]*dependencyNode),
-		inEdgeLookup: make(map[int]map[int]bool),
+		nodes:          make(map[int]*dependencyNode),
+		dependantsById: make(map[int]map[int]bool),
 	}
 
 	for _, node := range nodes {
@@ -42,11 +43,11 @@ func (dag *dependencyDag) add(node *dependencyNode) {
 
 func (dag *dependencyDag) updateLookups(node *dependencyNode) {
 	for _, dep := range node.Dependencies {
-		_, ok := dag.inEdgeLookup[dep]
+		_, ok := dag.dependantsById[dep]
 		if !ok {
-			dag.inEdgeLookup[dep] = make(map[int]bool)
+			dag.dependantsById[dep] = make(map[int]bool)
 		}
-		dag.inEdgeLookup[dep][node.Id] = true
+		dag.dependantsById[dep][node.Id] = true
 	}
 }
 
@@ -57,37 +58,85 @@ func (dag *dependencyDag) lookup(id int) *dependencyNode {
 func (dag *dependencyDag) dependants(id int) []int {
 	var dependantsIds []int
 
-	for id, _ := range dag.inEdgeLookup[id] {
+	for id, _ := range dag.dependantsById[id] {
 		dependantsIds = append(dependantsIds, id)
 	}
 
 	return dependantsIds
 }
 
-func (dag *dependencyDag) topologicalOrder() []int {
-	var orderedIds []int
-	visitedIds := make(map[int]bool)
+type dagQueue interface {
+	addBatch([]dagQueueElement)
+	close()
+}
 
-	// Find all nodes without dependencies
+type dagChannelQueue struct {
+	channel chan dagQueueElement
+}
+
+func (q *dagChannelQueue) addBatch(elements []dagQueueElement) {
+	for _, element := range elements {
+		q.channel <- element
+	}
+}
+
+func (q *dagChannelQueue) close() {
+	close(q.channel)
+}
+
+type dagQueueElement struct {
+	nodeId int
+	wg     *sync.WaitGroup
+}
+
+func (dag *dependencyDag) concurrentWalk(processing dagQueue) {
+	q := make([]int, 0)
+	inDegreeById := make([]int, len(dag.nodes))
 	for id, node := range dag.nodes {
-		if len(node.Dependencies) == 0 {
-			orderedIds = append(orderedIds, id)
-			visitedIds[id] = true
+		inDegreeById[id] = len(node.Dependencies)
+	}
+
+	wg := sync.WaitGroup{}
+
+	batch := make([]dagQueueElement, 0)
+	newElement := func(id int) {
+		q = append(q, id)
+		wg.Add(1)
+		batch = append(batch, dagQueueElement{
+			nodeId: id,
+			wg:     &wg,
+		})
+	}
+	enqueueBatch := func() {
+		processing.addBatch(batch)
+		batch = make([]dagQueueElement, 0)
+	}
+
+	for id, degree := range inDegreeById {
+		if degree == 0 {
+			newElement(id)
 		}
 	}
 
-	i := 0
-	for i < len(orderedIds) {
-		for _, depId := range dag.dependants(orderedIds[i]) {
-			if !visitedIds[depId] {
-				orderedIds = append(orderedIds, depId)
-				visitedIds[depId] = true
+	enqueueBatch()
+	wg.Wait()
+
+	for len(q) > 0 {
+		current := q[0]
+		q = q[1:]
+
+		for _, d := range dag.dependants(current) {
+			inDegreeById[d] = inDegreeById[d] - 1
+			if inDegreeById[d] == 0 {
+				newElement(d)
 			}
 		}
-		i++
+
+		enqueueBatch()
+		wg.Wait()
 	}
 
-	return orderedIds
+	processing.close()
 }
 
 func (dag *dependencyDag) String() string {

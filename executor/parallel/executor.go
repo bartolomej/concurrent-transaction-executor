@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"time"
 )
 
 type Executor struct {
@@ -16,17 +17,29 @@ func NewExecutor(nWorkers int) *Executor {
 }
 
 func (e *Executor) ExecuteBlock(block executor.Block, state executor.AccountState) ([]executor.AccountValue, error) {
-	workers := e.initWorkers(block.Transactions, state)
+	// TODO: Handle when NWorkers > len(block.Transactions)
+	// TODO: Refactor initWorkers to be more idiomatic and rely on channels
+	transactionsQueue := make(chan indexedTransaction)
 	executionReports := make(chan executionReport)
 
-	var wg sync.WaitGroup
-	for _, worker := range workers {
-		wg.Add(1)
-		go func(w executionWorker) {
-			w.execute(executionReports)
+	wg := sync.WaitGroup{}
+	for i := 0; i < e.NWorkers; i++ {
+		worker := executionWorker{state: state}
+		go func(wg *sync.WaitGroup) {
+			wg.Add(1)
+			worker.execute(transactionsQueue, executionReports)
 			wg.Done()
-		}(worker)
+		}(&wg)
 	}
+
+	for i, tx := range block.Transactions {
+		transactionsQueue <- indexedTransaction{
+			index:       i,
+			transaction: tx,
+		}
+	}
+	close(transactionsQueue)
+
 	go func() {
 		wg.Wait()
 		close(executionReports)
@@ -41,8 +54,19 @@ func (e *Executor) ExecuteBlock(block executor.Block, state executor.AccountStat
 	})
 	dag := buildDependencyDag(reports)
 
-	fmt.Println("DAG")
-	fmt.Println(dag)
+	processingQueue := &dagChannelQueue{channel: make(chan dagQueueElement, e.NWorkers)}
+
+	for i := 0; i < e.NWorkers; i++ {
+		go func(workerId int, queue <-chan dagQueueElement) {
+			element := <-queue
+			fmt.Printf("worker %d processing node: %d\n", workerId, element.nodeId)
+			time.Sleep(time.Second)
+			element.wg.Done()
+
+		}(i, processingQueue.channel)
+	}
+
+	dag.concurrentWalk(processingQueue)
 
 	panic("not implemented")
 }
@@ -70,20 +94,4 @@ func buildDependencyDag(reports []executionReport) *dependencyDag {
 	}
 
 	return dag
-}
-
-func (e *Executor) initWorkers(transactions []executor.Transaction, state executor.AccountState) []executionWorker {
-	var workers []executionWorker
-	l := e.NWorkers
-	n := len(transactions)
-	for i := 0; i < n; i++ {
-		start := i * l / n
-		end := (i + 1) * l / n
-		workers = append(workers, executionWorker{
-			firstTxIndex: start,
-			transactions: transactions[start:end],
-			state:        state,
-		})
-	}
-	return workers
 }

@@ -52,6 +52,29 @@ func TestDag1(t *testing.T) {
 	assertEqual(t, actual, expected)
 }
 
+type testDagQueue struct {
+	batches [][]int
+}
+
+func newTestDagQueue() *testDagQueue {
+	return &testDagQueue{
+		batches: make([][]int, 0),
+	}
+}
+
+func (q *testDagQueue) addBatch(batch []dagQueueElement) {
+	idBatch := make([]int, 0)
+	for _, element := range batch {
+		idBatch = append(idBatch, element.nodeId)
+		element.wg.Done()
+	}
+	q.batches = append(q.batches, idBatch)
+}
+
+func (q *testDagQueue) close() {
+	// noop
+}
+
 func TestTopologicalOrder1(t *testing.T) {
 	dag := newDependencyDag([]*dependencyNode{
 		{
@@ -64,18 +87,28 @@ func TestTopologicalOrder1(t *testing.T) {
 		},
 		{
 			Id:           2,
-			Dependencies: []int{0, 1},
+			Dependencies: []int{0},
 		},
 		{
 			Id:           3,
-			Dependencies: []int{2},
+			Dependencies: []int{0, 1},
 		},
 	})
 
-	actual := dag.topologicalOrder()
-	expected := []int{0, 1, 2, 3}
-	if !slices.Equal(actual, expected) {
-		t.Errorf("actual %v != expected %v", actual, expected)
+	testQueue := newTestDagQueue()
+	dag.concurrentWalk(testQueue)
+
+	expected := [][]int{
+		{0},
+		{1, 2},
+		{3},
+	}
+	actual := testQueue.batches
+
+	for i := range expected {
+		if !slices.Equal(actual[i], expected[i]) {
+			t.Errorf("actual[%d] %v != expected[%d] %v", i, actual, i, expected)
+		}
 	}
 }
 

@@ -10,26 +10,27 @@ import (
 // executionWorker executes a set of transactions given state
 // and produces an executionReport for each executed transaction
 type executionWorker struct {
-	firstTxIndex int
-	transactions []executor.Transaction
-	state        executor.AccountState
+	state executor.AccountState
 }
 
-func (e executionWorker) execute(reports chan<- executionReport) {
-	index := e.firstTxIndex
-	for _, transaction := range e.transactions {
+type indexedTransaction struct {
+	index       int
+	transaction executor.Transaction
+}
+
+func (e executionWorker) execute(
+	transactions <-chan indexedTransaction,
+	reports chan<- executionReport,
+) {
+	for tx := range transactions {
 		proxy := newStateProxy(e.state)
-		updates, err := transaction.Updates(proxy)
-		if err != nil {
-			fmt.Printf("skipping failed transaction: %s\n", err)
-			break
-		}
+		updates, err := tx.transaction.Updates(proxy)
 		reports <- executionReport{
-			index:   index,
+			index:   tx.index,
 			updates: updates,
 			reads:   proxy.reads,
+			err:     err,
 		}
-		index++
 	}
 }
 
@@ -40,10 +41,12 @@ type accountRead struct {
 
 type executionReport struct {
 	index int
-	// reads stores account names that were read by the transaction
+	// reads account names that were read by the transaction
 	reads []string
-	// updates stores account state changes that were produced by the transaction
+	// updates account state changes that were produced by the transaction
 	updates []executor.AccountUpdate
+	// no updates were produced if err is set
+	err error
 }
 
 func (r executionReport) String() string {
