@@ -54,7 +54,7 @@ func (s *executorState) ApplyUpdates(updates []AccountUpdate) {
 		if !ok {
 			s.initAccount(u.Name)
 		}
-		s.uncommitedBalancesByName[u.Name] += u.BalanceChange
+		s.uncommitedBalancesByName[u.Name] += uint(u.BalanceChange)
 	}
 }
 

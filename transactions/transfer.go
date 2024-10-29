@@ -17,7 +17,7 @@ func (t Transfer) Updates(state executor.AccountState) ([]executor.AccountUpdate
 		return nil, fmt.Errorf("insufficient balance")
 	}
 	return []executor.AccountUpdate{
-		{Name: t.From, BalanceChange: -t.Value},
-		{Name: t.To, BalanceChange: t.Value},
+		{Name: t.From, BalanceChange: -int(t.Value)},
+		{Name: t.To, BalanceChange: int(t.Value)},
 	}, nil
 }

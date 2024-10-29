@@ -10,7 +10,7 @@ type Transaction interface {
 
 type AccountUpdate struct {
 	Name          string
-	BalanceChange uint
+	BalanceChange int
 }
 
 type AccountValue struct {
