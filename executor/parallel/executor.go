@@ -2,10 +2,9 @@ package parallel
 
 import (
 	"blockchain/executor"
-	"fmt"
 	"slices"
+	"sort"
 	"sync"
-	"time"
 )
 
 type Executor struct {
@@ -17,8 +16,6 @@ func NewExecutor(nWorkers int) *Executor {
 }
 
 func (e *Executor) ExecuteBlock(block executor.Block, state executor.AccountState) ([]executor.AccountValue, error) {
-	// TODO: Handle when NWorkers > len(block.Transactions)
-	// TODO: Refactor initWorkers to be more idiomatic and rely on channels
 	transactionsQueue := make(chan indexedTransaction)
 	executionReports := make(chan executionReport)
 
@@ -52,23 +49,91 @@ func (e *Executor) ExecuteBlock(block executor.Block, state executor.AccountStat
 	slices.SortFunc(reports, func(a, b executionReport) int {
 		return a.index - b.index
 	})
-	dag := buildDependencyDag(reports)
 
-	processingQueue := &dagChannelQueue{channel: make(chan dagQueueElement, e.NWorkers)}
+	dag := buildDependencyDag(reports)
+	processingQueue := newDagChannelQueue()
+	executionState := newConcurrentExecutionAccountState(state)
 
 	for i := 0; i < e.NWorkers; i++ {
 		go func(workerId int, queue <-chan dagQueueElement) {
-			element := <-queue
-			fmt.Printf("worker %d processing node: %d\n", workerId, element.nodeId)
-			time.Sleep(time.Second)
-			element.wg.Done()
+			visited := <-queue
+			defer visited.wg.Done()
+
+			node := dag.lookup(visited.nodeId)
+			report := reports[visited.nodeId]
+			tx := block.Transactions[visited.nodeId]
+			iTx := indexedTransaction{
+				index:       visited.nodeId,
+				transaction: tx,
+			}
+
+			if len(node.Dependencies) == 0 {
+				executionState.WriteUpdates(report.updates)
+				return
+			}
+
+			// TODO: check if dependencies or updates changed after re-processing
+			executeAndReport(state, iTx)
 
 		}(i, processingQueue.channel)
 	}
 
 	dag.concurrentWalk(processingQueue)
 
-	panic("not implemented")
+	return executionState.UpdatedValues(), nil
+}
+
+type concurrentExecutionAccountState struct {
+	updatedState map[string]*executor.AccountValue
+	oldState     executor.AccountState
+	mu           sync.RWMutex
+}
+
+func newConcurrentExecutionAccountState(oldState executor.AccountState) *concurrentExecutionAccountState {
+	return &concurrentExecutionAccountState{
+		updatedState: make(map[string]*executor.AccountValue),
+		oldState:     oldState,
+	}
+}
+
+func (s *concurrentExecutionAccountState) GetAccount(name string) executor.AccountValue {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if v, ok := s.updatedState[name]; ok {
+		return *v
+	} else {
+		return s.oldState.GetAccount(name)
+	}
+}
+
+func (s *concurrentExecutionAccountState) WriteUpdates(updates []executor.AccountUpdate) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, update := range updates {
+		v, ok := s.updatedState[update.Name]
+		if ok {
+			v.Balance += uint(update.BalanceChange)
+		} else {
+			s.updatedState[update.Name] = &executor.AccountValue{
+				Name:    update.Name,
+				Balance: s.oldState.GetAccount(update.Name).Balance + uint(update.BalanceChange),
+			}
+		}
+	}
+}
+
+func (s *concurrentExecutionAccountState) UpdatedValues() []executor.AccountValue {
+	var updatedValues []executor.AccountValue
+	for _, v := range s.updatedState {
+		updatedValues = append(updatedValues, *v)
+	}
+
+	// TODO: Does ExecuteBlock need to return entries in a specific order?
+	sort.Slice(updatedValues, func(i, j int) bool {
+		return updatedValues[i].Name < updatedValues[j].Name
+	})
+
+	return updatedValues
 }
 
 // buildDependencyDag produces a dependency DAG (Directed Acyclic Graph)

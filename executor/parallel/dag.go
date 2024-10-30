@@ -74,6 +74,10 @@ type dagChannelQueue struct {
 	channel chan dagQueueElement
 }
 
+func newDagChannelQueue() *dagChannelQueue {
+	return &dagChannelQueue{channel: make(chan dagQueueElement)}
+}
+
 func (q *dagChannelQueue) addBatch(elements []dagQueueElement) {
 	for _, element := range elements {
 		q.channel <- element

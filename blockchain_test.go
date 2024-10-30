@@ -3,6 +3,7 @@ package blockchain
 import (
 	"blockchain/executor"
 	"blockchain/executor/parallel"
+	"blockchain/executor/serial"
 	"blockchain/transactions"
 	"testing"
 )
@@ -48,7 +49,7 @@ func TestExecutorTransferTransaction2(t *testing.T) {
 		{Name: "C", Balance: 20},
 		{Name: "D", Balance: 50},
 	}
-	//assertExecution(t, expectedUpdateState, block, startState, serial.NewExecutor())
+	assertExecution(t, expectedUpdateState, block, startState, serial.NewExecutor())
 	assertExecution(t, expectedUpdateState, block, startState, parallel.NewExecutor(2))
 }
 
@@ -70,7 +71,7 @@ func TestExecutorTransferTransaction3(t *testing.T) {
 		{Name: "B", Balance: 0},
 		{Name: "C", Balance: 20},
 	}
-	//assertExecution(t, expectedUpdateState, block, startState, serial.NewExecutor())
+	assertExecution(t, expectedUpdateState, block, startState, serial.NewExecutor())
 	assertExecution(t, expectedUpdateState, block, startState, parallel.NewExecutor(3))
 
 }
@@ -103,7 +104,7 @@ func assertExecution(
 			t.Errorf("name assertion failed -> expected: %s, actual: %s", expected.Name, actual.Name)
 		}
 		if expected.Balance != actual.Balance {
-			t.Errorf("balance assertion failed -> expected: %d, actual: %d", expected.Balance, actual.Balance)
+			t.Errorf("balance assertion failed for %s -> expected: %d, actual: %d", expected.Name, expected.Balance, actual.Balance)
 		}
 	}
 }

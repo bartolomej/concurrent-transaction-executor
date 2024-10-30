@@ -34,9 +34,15 @@ func (e executionWorker) execute(
 	}
 }
 
-type accountRead struct {
-	name      string
-	timestamp int64
+func executeAndReport(state executor.AccountState, tx indexedTransaction) executionReport {
+	proxy := newStateProxy(state)
+	updates, err := tx.transaction.Updates(proxy)
+	return executionReport{
+		index:   tx.index,
+		updates: updates,
+		reads:   proxy.reads,
+		err:     err,
+	}
 }
 
 type executionReport struct {
