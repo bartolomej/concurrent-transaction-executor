@@ -3,6 +3,7 @@ package parallel
 import (
 	"blockchain/executor"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -28,7 +29,7 @@ func (e executionWorker) execute(
 		reports <- executionReport{
 			index:   tx.index,
 			updates: updates,
-			reads:   proxy.reads,
+			reads:   proxy.reads(),
 			err:     err,
 		}
 	}
@@ -40,7 +41,7 @@ func executeAndReport(state executor.AccountState, tx indexedTransaction) execut
 	return executionReport{
 		index:   tx.index,
 		updates: updates,
-		reads:   proxy.reads,
+		reads:   proxy.reads(),
 		err:     err,
 	}
 }
@@ -67,7 +68,7 @@ func (r executionReport) String() string {
 	}
 
 	return fmt.Sprintf(
-		"executionReport{index: %d, reads: %s, updates: %s}",
+		"executionReport{index: %d, readsLookup: %s, updates: %s}",
 		r.index,
 		"("+strings.Join(readNames, ",")+")",
 		"("+strings.Join(updateEntries, ",")+")",
@@ -75,15 +76,25 @@ func (r executionReport) String() string {
 }
 
 type stateProxy struct {
-	reads []string
-	state executor.AccountState
+	readsLookup map[string]bool
+	state       executor.AccountState
 }
 
 func newStateProxy(state executor.AccountState) *stateProxy {
-	return &stateProxy{state: state}
+	return &stateProxy{readsLookup: make(map[string]bool), state: state}
 }
 
 func (s *stateProxy) GetAccount(name string) executor.AccountValue {
-	s.reads = append(s.reads, name)
+	s.readsLookup[name] = true
 	return s.state.GetAccount(name)
+}
+
+func (s *stateProxy) reads() []string {
+	reads := make([]string, 0, len(s.readsLookup))
+	for read, _ := range s.readsLookup {
+		reads = append(reads, read)
+	}
+	// Sort so that comparisons with slices.Equal work
+	sort.Strings(reads)
+	return reads
 }

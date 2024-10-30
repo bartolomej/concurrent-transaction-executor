@@ -56,31 +56,48 @@ func (e *Executor) ExecuteBlock(block executor.Block, state executor.AccountStat
 
 	for i := 0; i < e.NWorkers; i++ {
 		go func(workerId int, queue <-chan dagQueueElement) {
-			visited := <-queue
-			defer visited.wg.Done()
-
-			node := dag.lookup(visited.nodeId)
-			report := reports[visited.nodeId]
-			tx := block.Transactions[visited.nodeId]
-			iTx := indexedTransaction{
-				index:       visited.nodeId,
-				transaction: tx,
+			for visited := range queue {
+				node := dag.lookup(visited.nodeId)
+				report := reports[visited.nodeId]
+				tx := block.Transactions[visited.nodeId]
+				processDagQueueElement(node, report, tx, executionState)
+				visited.wg.Done()
 			}
-
-			if len(node.Dependencies) == 0 {
-				executionState.WriteUpdates(report.updates)
-				return
-			}
-
-			// TODO: check if dependencies or updates changed after re-processing
-			executeAndReport(state, iTx)
-
 		}(i, processingQueue.channel)
 	}
 
 	dag.concurrentWalk(processingQueue)
 
 	return executionState.UpdatedValues(), nil
+}
+
+func processDagQueueElement(
+	node *dependencyNode,
+	report executionReport,
+	tx executor.Transaction,
+	executionState *concurrentExecutionAccountState,
+) {
+	iTx := indexedTransaction{
+		index:       report.index,
+		transaction: tx,
+	}
+
+	// No need to re-execute the transaction,
+	// as no other transaction can affect its dependencies
+	if len(node.Dependencies) == 0 {
+		executionState.WriteUpdates(report.updates)
+		return
+	}
+
+	newReport := executeAndReport(executionState, iTx)
+	if slices.Equal(report.reads, newReport.reads) {
+		// TODO: Writing newReport.updates will only work if there are no descending dependants on the new updates
+		executionState.WriteUpdates(newReport.updates)
+		return
+	}
+
+	// TODO: if reads or updates changed, update the dag to "invalidate" descendant nodes
+	panic("unimplemented")
 }
 
 type concurrentExecutionAccountState struct {
