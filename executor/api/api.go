@@ -1,4 +1,4 @@
-package executor
+package api
 
 type Block struct {
 	Transactions []Transaction

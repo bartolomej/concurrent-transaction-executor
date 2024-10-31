@@ -1,7 +1,7 @@
 package parallel
 
 import (
-	"blockchain/executor"
+	"blockchain/executor/api"
 	"fmt"
 	"slices"
 	"strconv"
@@ -269,11 +269,11 @@ type executionNode struct {
 	// reads account names that were read by the transaction
 	reads []string
 	// updates account state changes that were produced by the transaction
-	updates []executor.AccountUpdate
+	updates []api.AccountUpdate
 	// no updates were produced if err is set
 	err error
 	// transaction is the state transition function that produces reads, updates, err
-	transaction executor.Transaction
+	transaction api.Transaction
 }
 
 func (node *executionNode) String() string {

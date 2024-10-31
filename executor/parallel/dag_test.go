@@ -1,7 +1,7 @@
 package parallel
 
 import (
-	"blockchain/executor"
+	"blockchain/executor/api"
 	"slices"
 	"testing"
 )
@@ -11,21 +11,21 @@ func TestDag1(t *testing.T) {
 		{
 			seqId: 0,
 			reads: []string{"A", "B"},
-			updates: []executor.AccountUpdate{
+			updates: []api.AccountUpdate{
 				{Name: "A"},
 			},
 		},
 		{
 			seqId: 1,
 			reads: []string{"A"},
-			updates: []executor.AccountUpdate{
+			updates: []api.AccountUpdate{
 				{Name: "B"},
 			},
 		},
 		{
 			seqId: 2,
 			reads: []string{"A", "B"},
-			updates: []executor.AccountUpdate{
+			updates: []api.AccountUpdate{
 				{Name: "A"},
 				{Name: "B"},
 			},
@@ -60,21 +60,21 @@ func TestDagNodeRemoval(t *testing.T) {
 		{
 			seqId: 0,
 			reads: []string{"A", "B"},
-			updates: []executor.AccountUpdate{
+			updates: []api.AccountUpdate{
 				{Name: "A"},
 			},
 		},
 		{
 			seqId: 1,
 			reads: []string{"A"},
-			updates: []executor.AccountUpdate{
+			updates: []api.AccountUpdate{
 				{Name: "B"},
 			},
 		},
 		{
 			seqId: 2,
 			reads: []string{"A", "B"},
-			updates: []executor.AccountUpdate{
+			updates: []api.AccountUpdate{
 				{Name: "A"},
 				{Name: "B"},
 			},
@@ -107,21 +107,21 @@ func TestTopologicalOrder1(t *testing.T) {
 		{
 			seqId: 0,
 			reads: []string{"A"},
-			updates: []executor.AccountUpdate{
+			updates: []api.AccountUpdate{
 				{Name: "A"},
 			},
 		},
 		{
 			seqId: 1,
 			reads: []string{"B"},
-			updates: []executor.AccountUpdate{
+			updates: []api.AccountUpdate{
 				{Name: "B"},
 			},
 		},
 		{
 			seqId: 2,
 			reads: []string{"A"},
-			updates: []executor.AccountUpdate{
+			updates: []api.AccountUpdate{
 				{Name: "B"},
 			},
 		},

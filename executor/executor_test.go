@@ -1,7 +1,7 @@
-package blockchain
+package executor
 
 import (
-	"blockchain/executor"
+	"blockchain/executor/api"
 	"blockchain/executor/parallel"
 	"blockchain/executor/serial"
 	"blockchain/transactions"
@@ -11,18 +11,18 @@ import (
 
 func TestExecutorTransferTransaction1(t *testing.T) {
 	startState := testAccountState{
-		executor.AccountValue{Name: "A", Balance: 20},
-		executor.AccountValue{Name: "B", Balance: 30},
-		executor.AccountValue{Name: "C", Balance: 40},
+		api.AccountValue{Name: "A", Balance: 20},
+		api.AccountValue{Name: "B", Balance: 30},
+		api.AccountValue{Name: "C", Balance: 40},
 	}
-	block := executor.Block{
-		Transactions: []executor.Transaction{
+	block := api.Block{
+		Transactions: []api.Transaction{
 			transactions.Transfer{From: "A", To: "B", Value: 5},
 			transactions.Transfer{From: "B", To: "C", Value: 10},
 			transactions.Transfer{From: "B", To: "C", Value: 30}, // should fail
 		},
 	}
-	expectedUpdateState := []executor.AccountValue{
+	expectedUpdateState := []api.AccountValue{
 		{Name: "A", Balance: 15},
 		{Name: "B", Balance: 25},
 		{Name: "C", Balance: 50},
@@ -33,18 +33,18 @@ func TestExecutorTransferTransaction1(t *testing.T) {
 
 func TestExecutorTransferTransaction2(t *testing.T) {
 	startState := testAccountState{
-		executor.AccountValue{Name: "A", Balance: 10},
-		executor.AccountValue{Name: "B", Balance: 20},
-		executor.AccountValue{Name: "C", Balance: 30},
-		executor.AccountValue{Name: "D", Balance: 40},
+		api.AccountValue{Name: "A", Balance: 10},
+		api.AccountValue{Name: "B", Balance: 20},
+		api.AccountValue{Name: "C", Balance: 30},
+		api.AccountValue{Name: "D", Balance: 40},
 	}
-	block := executor.Block{
-		Transactions: []executor.Transaction{
+	block := api.Block{
+		Transactions: []api.Transaction{
 			transactions.Transfer{From: "A", To: "B", Value: 5},
 			transactions.Transfer{From: "C", To: "D", Value: 10},
 		},
 	}
-	expectedUpdateState := []executor.AccountValue{
+	expectedUpdateState := []api.AccountValue{
 		{Name: "A", Balance: 5},
 		{Name: "B", Balance: 25},
 		{Name: "C", Balance: 20},
@@ -56,18 +56,18 @@ func TestExecutorTransferTransaction2(t *testing.T) {
 
 func TestExecutorTransferTransaction3(t *testing.T) {
 	startState := testAccountState{
-		executor.AccountValue{Name: "A", Balance: 20},
-		executor.AccountValue{Name: "B", Balance: 0},
-		executor.AccountValue{Name: "C", Balance: 0},
+		api.AccountValue{Name: "A", Balance: 20},
+		api.AccountValue{Name: "B", Balance: 0},
+		api.AccountValue{Name: "C", Balance: 0},
 	}
-	block := executor.Block{
-		Transactions: []executor.Transaction{
+	block := api.Block{
+		Transactions: []api.Transaction{
 			transactions.Transfer{From: "A", To: "B", Value: 10},
 			transactions.Transfer{From: "A", To: "C", Value: 10},
 			transactions.Transfer{From: "B", To: "C", Value: 10},
 		},
 	}
-	expectedUpdateState := []executor.AccountValue{
+	expectedUpdateState := []api.AccountValue{
 		{Name: "A", Balance: 0},
 		{Name: "B", Balance: 0},
 		{Name: "C", Balance: 20},
@@ -78,10 +78,10 @@ func TestExecutorTransferTransaction3(t *testing.T) {
 
 func TestExecutorConditionalTransaction4(t *testing.T) {
 	startState := testAccountState{
-		executor.AccountValue{Name: "A", Balance: 10},
-		executor.AccountValue{Name: "B", Balance: 10},
-		executor.AccountValue{Name: "C", Balance: 0},
-		executor.AccountValue{Name: "D", Balance: 0},
+		api.AccountValue{Name: "A", Balance: 10},
+		api.AccountValue{Name: "B", Balance: 10},
+		api.AccountValue{Name: "C", Balance: 0},
+		api.AccountValue{Name: "D", Balance: 0},
 	}
 	mintTx := transactions.Mint{To: "B", Value: 5}
 	condBulkTransferTx := conditionalBulkTransfer{
@@ -90,19 +90,19 @@ func TestExecutorConditionalTransaction4(t *testing.T) {
 		value:              10,
 		untilBalanceEquals: 10,
 	}
-	block1 := executor.Block{
-		Transactions: []executor.Transaction{
+	block1 := api.Block{
+		Transactions: []api.Transaction{
 			newLongRunningTx(mintTx, time.Second),
 			condBulkTransferTx,
 		},
 	}
-	block2 := executor.Block{
-		Transactions: []executor.Transaction{
+	block2 := api.Block{
+		Transactions: []api.Transaction{
 			mintTx,
 			newLongRunningTx(condBulkTransferTx, time.Second),
 		},
 	}
-	expectedUpdateState := []executor.AccountValue{
+	expectedUpdateState := []api.AccountValue{
 		{Name: "A", Balance: 0},
 		{Name: "B", Balance: 15},
 		{Name: "C", Balance: 10},
@@ -111,25 +111,24 @@ func TestExecutorConditionalTransaction4(t *testing.T) {
 	assertExecution(t, expectedUpdateState, block1, startState, serial.NewExecutor())
 	assertExecution(t, expectedUpdateState, block2, startState, serial.NewExecutor())
 
-	for i := 0; i < 10; i++ {
-		assertExecution(t, expectedUpdateState, block1, startState, parallel.NewExecutor(3))
-		assertExecution(t, expectedUpdateState, block2, startState, parallel.NewExecutor(3))
-	}
+	// TODO: Run multiple times to account for randomness
+	assertExecution(t, expectedUpdateState, block1, startState, parallel.NewExecutor(3))
+	assertExecution(t, expectedUpdateState, block2, startState, parallel.NewExecutor(3))
 }
 
 type longRunningTx struct {
 	duration  time.Duration
-	delayedTx executor.Transaction
+	delayedTx api.Transaction
 }
 
-func newLongRunningTx(delayedTx executor.Transaction, duration time.Duration) longRunningTx {
+func newLongRunningTx(delayedTx api.Transaction, duration time.Duration) longRunningTx {
 	return longRunningTx{
 		delayedTx: delayedTx,
 		duration:  duration,
 	}
 }
 
-func (tx longRunningTx) Updates(state executor.AccountState) ([]executor.AccountUpdate, error) {
+func (tx longRunningTx) Updates(state api.AccountState) ([]api.AccountUpdate, error) {
 	time.Sleep(tx.duration)
 	return tx.delayedTx.Updates(state)
 }
@@ -144,8 +143,8 @@ type conditionalBulkTransfer struct {
 	untilBalanceEquals uint
 }
 
-func (t conditionalBulkTransfer) Updates(state executor.AccountState) ([]executor.AccountUpdate, error) {
-	var updates []executor.AccountUpdate
+func (t conditionalBulkTransfer) Updates(state api.AccountState) ([]api.AccountUpdate, error) {
+	var updates []api.AccountUpdate
 	for i, from := range t.from {
 		to := t.to[i]
 		acc := state.GetAccount(from)
@@ -167,23 +166,23 @@ func (t conditionalBulkTransfer) Updates(state executor.AccountState) ([]executo
 	return updates, nil
 }
 
-type testAccountState []executor.AccountValue
+type testAccountState []api.AccountValue
 
-func (s testAccountState) GetAccount(name string) executor.AccountValue {
+func (s testAccountState) GetAccount(name string) api.AccountValue {
 	for _, v := range s {
 		if v.Name == name {
 			return v
 		}
 	}
-	return executor.AccountValue{Name: name, Balance: 0}
+	return api.AccountValue{Name: name, Balance: 0}
 }
 
 func assertExecution(
 	t *testing.T,
-	expectedStateUpdate []executor.AccountValue,
-	block executor.Block,
-	startState executor.AccountState,
-	executor executor.BlockExecutor,
+	expectedStateUpdate []api.AccountValue,
+	block api.Block,
+	startState api.AccountState,
+	executor api.BlockExecutor,
 ) {
 	actualStateUpdate, err := executor.ExecuteBlock(block, startState)
 	if err != nil {

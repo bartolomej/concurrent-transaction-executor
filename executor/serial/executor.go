@@ -1,7 +1,7 @@
 package serial
 
 import (
-	"blockchain/executor"
+	"blockchain/executor/api"
 	"fmt"
 	"sort"
 )
@@ -12,7 +12,7 @@ func NewExecutor() *Executor {
 	return &Executor{}
 }
 
-func (e *Executor) ExecuteBlock(block executor.Block, startState executor.AccountState) ([]executor.AccountValue, error) {
+func (e *Executor) ExecuteBlock(block api.Block, startState api.AccountState) ([]api.AccountValue, error) {
 	blockState := newExecutorState(startState)
 
 	for i, tx := range block.Transactions {
@@ -29,27 +29,27 @@ func (e *Executor) ExecuteBlock(block executor.Block, startState executor.Accoun
 
 type executorState struct {
 	uncommitedBalancesByName map[string]uint
-	startState               executor.AccountState
+	startState               api.AccountState
 }
 
-func newExecutorState(startState executor.AccountState) *executorState {
+func newExecutorState(startState api.AccountState) *executorState {
 	return &executorState{
 		startState:               startState,
 		uncommitedBalancesByName: make(map[string]uint),
 	}
 }
 
-func (s *executorState) GetAccount(name string) executor.AccountValue {
+func (s *executorState) GetAccount(name string) api.AccountValue {
 	_, ok := s.uncommitedBalancesByName[name]
 
 	if !ok {
 		s.initAccount(name)
 	}
 
-	return executor.AccountValue{Name: name, Balance: s.uncommitedBalancesByName[name]}
+	return api.AccountValue{Name: name, Balance: s.uncommitedBalancesByName[name]}
 }
 
-func (s *executorState) ApplyUpdates(updates []executor.AccountUpdate) {
+func (s *executorState) ApplyUpdates(updates []api.AccountUpdate) {
 	for _, u := range updates {
 		_, ok := s.uncommitedBalancesByName[u.Name]
 		if !ok {
@@ -63,10 +63,10 @@ func (s *executorState) initAccount(name string) {
 	s.uncommitedBalancesByName[name] = s.startState.GetAccount(name).Balance
 }
 
-func (s *executorState) UpdatedAccountValues() []executor.AccountValue {
-	var updatedValues []executor.AccountValue
+func (s *executorState) UpdatedAccountValues() []api.AccountValue {
+	var updatedValues []api.AccountValue
 	for k, v := range s.uncommitedBalancesByName {
-		updatedValues = append(updatedValues, executor.AccountValue{
+		updatedValues = append(updatedValues, api.AccountValue{
 			Name:    k,
 			Balance: v,
 		})
