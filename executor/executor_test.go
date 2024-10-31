@@ -5,6 +5,7 @@ import (
 	"blockchain/executor/parallel"
 	"blockchain/executor/serial"
 	"blockchain/transactions"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -27,8 +28,8 @@ func TestExecutorTransferTransaction1(t *testing.T) {
 		{Name: "B", Balance: 25},
 		{Name: "C", Balance: 50},
 	}
-	//assertExecution(t, expectedUpdateState, block, startState, executor.NewExecutor())
-	assertExecution(t, expectedUpdateState, block, startState, parallel.NewExecutor(3))
+	assertExecution(t, expectedUpdateState, block, startState, serial.NewExecutor(), "serial")
+	assertExecution(t, expectedUpdateState, block, startState, parallel.NewExecutor(3), "parallel")
 }
 
 func TestExecutorTransferTransaction2(t *testing.T) {
@@ -50,8 +51,8 @@ func TestExecutorTransferTransaction2(t *testing.T) {
 		{Name: "C", Balance: 20},
 		{Name: "D", Balance: 50},
 	}
-	assertExecution(t, expectedUpdateState, block, startState, serial.NewExecutor())
-	assertExecution(t, expectedUpdateState, block, startState, parallel.NewExecutor(2))
+	assertExecution(t, expectedUpdateState, block, startState, serial.NewExecutor(), "serial")
+	assertExecution(t, expectedUpdateState, block, startState, parallel.NewExecutor(2), "parallel")
 }
 
 func TestExecutorTransferTransaction3(t *testing.T) {
@@ -72,8 +73,8 @@ func TestExecutorTransferTransaction3(t *testing.T) {
 		{Name: "B", Balance: 0},
 		{Name: "C", Balance: 20},
 	}
-	assertExecution(t, expectedUpdateState, block, startState, serial.NewExecutor())
-	assertExecution(t, expectedUpdateState, block, startState, parallel.NewExecutor(3))
+	assertExecution(t, expectedUpdateState, block, startState, serial.NewExecutor(), "serial")
+	assertExecution(t, expectedUpdateState, block, startState, parallel.NewExecutor(3), "parallel")
 }
 
 func TestExecutorConditionalTransaction4(t *testing.T) {
@@ -92,14 +93,20 @@ func TestExecutorConditionalTransaction4(t *testing.T) {
 	}
 	block1 := api.Block{
 		Transactions: []api.Transaction{
-			newLongRunningTx(mintTx, time.Second),
+			longRunningTx{
+				duration:  time.Second,
+				delayedTx: mintTx,
+			},
 			condBulkTransferTx,
 		},
 	}
 	block2 := api.Block{
 		Transactions: []api.Transaction{
 			mintTx,
-			newLongRunningTx(condBulkTransferTx, time.Second),
+			longRunningTx{
+				duration:  time.Second,
+				delayedTx: condBulkTransferTx,
+			},
 		},
 	}
 	expectedUpdateState := []api.AccountValue{
@@ -108,24 +115,44 @@ func TestExecutorConditionalTransaction4(t *testing.T) {
 		{Name: "C", Balance: 10},
 	}
 
-	assertExecution(t, expectedUpdateState, block1, startState, serial.NewExecutor())
-	assertExecution(t, expectedUpdateState, block2, startState, serial.NewExecutor())
+	assertExecution(t, expectedUpdateState, block1, startState, serial.NewExecutor(), "serial")
+	assertExecution(t, expectedUpdateState, block2, startState, serial.NewExecutor(), "parallel")
 
 	// TODO: Run multiple times to account for randomness
-	assertExecution(t, expectedUpdateState, block1, startState, parallel.NewExecutor(3))
-	assertExecution(t, expectedUpdateState, block2, startState, parallel.NewExecutor(3))
+	assertExecution(t, expectedUpdateState, block1, startState, parallel.NewExecutor(3), "serial")
+	assertExecution(t, expectedUpdateState, block2, startState, parallel.NewExecutor(3), "parallel")
+}
+
+func TestExecutorConditionalTransaction5(t *testing.T) {
+	startState := testAccountState{
+		api.AccountValue{Name: "A", Balance: 0},
+	}
+	block := api.Block{
+		Transactions: []api.Transaction{
+			transactions.Mint{To: "A", Value: 10},
+			transactions.Transfer{From: "A", To: "B", Value: 10},
+			conditionalBulkTransfer{
+				from:               []string{"A", "B"},
+				to:                 []string{"C", "D"},
+				value:              10,
+				untilBalanceEquals: 10,
+			},
+			transactions.Transfer{From: "C", To: "E", Value: 10},
+			transactions.Transfer{From: "D", To: "E", Value: 10},
+		},
+	}
+	expectedUpdateState := []api.AccountValue{
+		{Name: "A", Balance: 0},
+		{Name: "B", Balance: 10},
+	}
+
+	assertExecution(t, expectedUpdateState, block, startState, serial.NewExecutor(), "serial")
+	assertExecution(t, expectedUpdateState, block, startState, parallel.NewExecutor(3), "parallel")
 }
 
 type longRunningTx struct {
 	duration  time.Duration
 	delayedTx api.Transaction
-}
-
-func newLongRunningTx(delayedTx api.Transaction, duration time.Duration) longRunningTx {
-	return longRunningTx{
-		delayedTx: delayedTx,
-		duration:  duration,
-	}
 }
 
 func (tx longRunningTx) Updates(state api.AccountState) ([]api.AccountUpdate, error) {
@@ -183,8 +210,14 @@ func assertExecution(
 	block api.Block,
 	startState api.AccountState,
 	executor api.BlockExecutor,
+	label string,
 ) {
+	start := time.Now()
 	actualStateUpdate, err := executor.ExecuteBlock(block, startState)
+	elapsed := time.Since(start)
+
+	fmt.Printf("Execution for %s took %s\n", label, elapsed)
+
 	if err != nil {
 		t.Error(err)
 	}

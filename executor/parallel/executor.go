@@ -21,22 +21,25 @@ func (e *Executor) ExecuteBlock(block api.Block, state api.AccountState) ([]api.
 
 	wg := sync.WaitGroup{}
 	for i := 0; i < e.NWorkers; i++ {
+		wg.Add(1)
 		go func(wg *sync.WaitGroup) {
-			wg.Add(1)
 			for itx := range indexedTxs {
+				// Send on closed channel happens here
 				executionNodes <- execute(state, itx)
 			}
 			wg.Done()
 		}(&wg)
 	}
 
-	for i, tx := range block.Transactions {
-		indexedTxs <- indexedTransaction{
-			index:       i,
-			transaction: tx,
+	go func() {
+		for i, tx := range block.Transactions {
+			indexedTxs <- indexedTransaction{
+				index:       i,
+				transaction: tx,
+			}
 		}
-	}
-	close(indexedTxs)
+		close(indexedTxs)
+	}()
 
 	go func() {
 		wg.Wait()
