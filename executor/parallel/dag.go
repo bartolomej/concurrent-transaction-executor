@@ -16,16 +16,13 @@ type dependencyDag struct {
 	dependantsById map[int]map[int]bool
 	// dependenciesById tracks a list of dependency nodes for every node ID
 	dependenciesById map[int]map[int]bool
+	// mu protects writes/reads to above maps
+	mu sync.RWMutex
 }
 
 // buildDependencyDag produces a dependency DAG (Directed Acyclic Graph)
 // given an ordered (by index) list of execution reports
 func newDependencyDag(nodes []*executionNode) *dependencyDag {
-	slices.SortFunc(nodes, func(a, b *executionNode) int {
-		return a.seqId - b.seqId
-	})
-
-	seqIdsByUpdate := make(map[string]map[int]bool)
 	dag := &dependencyDag{
 		nodes:            make(map[int]*executionNode),
 		dependantsById:   make(map[int]map[int]bool),
@@ -33,15 +30,35 @@ func newDependencyDag(nodes []*executionNode) *dependencyDag {
 	}
 
 	for _, node := range nodes {
-		depSeqIds := make(map[int]bool)
+		dag.nodes[node.seqId] = node
+	}
+
+	dag.computeEdges()
+
+	return dag
+}
+
+func (dag *dependencyDag) computeEdges() {
+	seqIdsByUpdate := make(map[string]map[int]bool)
+
+	orderedNodes := make([]*executionNode, 0, len(dag.nodes))
+	for _, node := range dag.nodes {
+		orderedNodes = append(orderedNodes, node)
+	}
+	slices.SortFunc(orderedNodes, func(a, b *executionNode) int {
+		return a.seqId - b.seqId
+	})
+
+	for _, node := range orderedNodes {
+		dependencies := make(map[int]bool)
 		for _, read := range node.reads {
 			for seqId, _ := range seqIdsByUpdate[read] {
-				depSeqIds[seqId] = true
+				dependencies[seqId] = true
 			}
 		}
-		dag.dependenciesById[node.seqId] = depSeqIds
+		dag.dependenciesById[node.seqId] = dependencies
 
-		for depSeqId, _ := range depSeqIds {
+		for depSeqId, _ := range dependencies {
 			_, ok := dag.dependantsById[depSeqId]
 			if !ok {
 				dag.dependantsById[depSeqId] = make(map[int]bool)
@@ -59,15 +76,19 @@ func newDependencyDag(nodes []*executionNode) *dependencyDag {
 			seqIdsByUpdate[update.Name][node.seqId] = true
 		}
 	}
-
-	return dag
 }
 
 func (dag *dependencyDag) lookup(id int) *executionNode {
+	dag.mu.RLock()
+	defer dag.mu.RUnlock()
+
 	return dag.nodes[id]
 }
 
 func (dag *dependencyDag) dependants(id int) []int {
+	dag.mu.RLock()
+	defer dag.mu.RUnlock()
+
 	var seqIds []int
 
 	for id, _ := range dag.dependantsById[id] {
@@ -78,6 +99,9 @@ func (dag *dependencyDag) dependants(id int) []int {
 }
 
 func (dag *dependencyDag) dependencies(id int) []int {
+	dag.mu.RLock()
+	defer dag.mu.RUnlock()
+
 	var seqIds []int
 
 	for id, _ := range dag.dependenciesById[id] {
@@ -87,82 +111,124 @@ func (dag *dependencyDag) dependencies(id int) []int {
 	return seqIds
 }
 
-type dagQueue interface {
-	addBatch([]dagQueueElement)
+func (dag *dependencyDag) update(newNode *executionNode) {
+	dag.mu.Lock()
+	defer dag.mu.Unlock()
+
+	oldNode := dag.nodes[newNode.seqId]
+
+	if oldNode == nil {
+		panic("cannot call update for new nodes")
+	}
+
+	dag.nodes[newNode.seqId] = newNode
+
+	// TODO: Optimize graph updates by not rebuilding the graph from scratch
+	dag.computeEdges()
+}
+
+type processingQueue interface {
+	process([]processingUnit)
 	close()
 }
 
-type dagChannelQueue struct {
-	channel chan dagQueueElement
+type channelProcessingQueue struct {
+	queue chan processingUnit
 }
 
-func newDagChannelQueue() *dagChannelQueue {
-	return &dagChannelQueue{channel: make(chan dagQueueElement)}
+func newChannelProcessingQueue() *channelProcessingQueue {
+	return &channelProcessingQueue{queue: make(chan processingUnit)}
 }
 
-func (q *dagChannelQueue) addBatch(elements []dagQueueElement) {
-	for _, element := range elements {
-		q.channel <- element
+func (q *channelProcessingQueue) process(units []processingUnit) {
+	for _, unit := range units {
+		q.queue <- unit
 	}
 }
 
-func (q *dagChannelQueue) close() {
-	close(q.channel)
+func (q *channelProcessingQueue) close() {
+	close(q.queue)
 }
 
-type dagQueueElement struct {
-	nodeId int
-	wg     *sync.WaitGroup
+type processingUnit struct {
+	seqId int
+	done  func()
 }
 
-func (dag *dependencyDag) concurrentWalk(processing dagQueue) {
+func (dag *dependencyDag) concurrentWalk(queue processingQueue) {
+	// nodes in the queue were already processed
+	// and are waiting to be traversed to process their dependants
 	q := make([]int, 0)
-	inDegreeById := make([]int, len(dag.nodes))
-	for id, node := range dag.nodes {
-		inDegreeById[id] = len(dag.dependencies(node.seqId))
-	}
-
 	wg := sync.WaitGroup{}
+	batch := make([]processingUnit, 0)
 
-	batch := make([]dagQueueElement, 0)
-	newElement := func(id int) {
-		q = append(q, id)
+	schedule := func(seqId int) {
 		wg.Add(1)
-		batch = append(batch, dagQueueElement{
-			nodeId: id,
-			wg:     &wg,
+		batch = append(batch, processingUnit{
+			seqId: seqId,
+			done: func() {
+				wg.Done()
+			},
 		})
+		q = append(q, seqId)
 	}
-	enqueueBatch := func() {
-		processing.addBatch(batch)
-		batch = make([]dagQueueElement, 0)
-	}
-
-	for id, degree := range inDegreeById {
-		if degree == 0 {
-			newElement(id)
+	awaitProcessing := func() {
+		if len(batch) > 0 {
+			queue.process(batch)
+			batch = make([]processingUnit, 0)
+			wg.Wait()
 		}
 	}
 
-	enqueueBatch()
-	wg.Wait()
+	for seqId, _ := range dag.nodes {
+		if len(dag.dependencies(seqId)) == 0 {
+			schedule(seqId)
+		}
+	}
+
+	awaitProcessing()
 
 	for len(q) > 0 {
-		current := q[0]
+		seqId := q[0]
 		q = q[1:]
 
-		for _, d := range dag.dependants(current) {
-			inDegreeById[d] = inDegreeById[d] - 1
-			if inDegreeById[d] == 0 {
-				newElement(d)
+		// Dependencies changed since last processing, delay removal.
+		// Node will be processed again at some future point,
+		// since it now depends on some other node that has yet to be traversed.
+		if len(dag.dependencies(seqId)) > 0 {
+			continue
+		}
+
+		dependants := dag.dependants(seqId)
+		dag.remove(seqId)
+
+		for _, depSeqId := range dependants {
+			if len(dag.dependencies(depSeqId)) == 0 {
+				schedule(depSeqId)
 			}
 		}
 
-		enqueueBatch()
-		wg.Wait()
+		awaitProcessing()
 	}
 
-	processing.close()
+	queue.close()
+}
+
+// remove the node and it's edges from the graph
+func (dag *dependencyDag) remove(seqId int) {
+	dag.mu.Lock()
+	defer dag.mu.Unlock()
+
+	for depSeqId := range dag.dependantsById[seqId] {
+		delete(dag.dependenciesById[depSeqId], seqId)
+	}
+	for depSeqId := range dag.dependenciesById[seqId] {
+		delete(dag.dependantsById[depSeqId], seqId)
+	}
+
+	delete(dag.dependenciesById, seqId)
+	delete(dag.dependantsById, seqId)
+	delete(dag.nodes, seqId)
 }
 
 func (dag *dependencyDag) String() string {
@@ -174,10 +240,26 @@ func (dag *dependencyDag) String() string {
 	slices.SortFunc(sortedNodes, func(a, b *executionNode) int {
 		return a.seqId - b.seqId
 	})
+
+	sb.WriteString("nodes:\n")
 	for _, node := range sortedNodes {
-		sb.WriteString(node.String())
-		sb.WriteString("\n")
+		sb.WriteString(fmt.Sprintf("- %s\n", node.String()))
 	}
+
+	sb.WriteString("dependencies:\n")
+	for _, node := range sortedNodes {
+		d := dag.dependencies(node.seqId)
+		slices.Sort(d)
+		sb.WriteString(fmt.Sprintf("%d -> %v\n", node.seqId, d))
+	}
+
+	sb.WriteString("dependants:\n")
+	for _, node := range sortedNodes {
+		d := dag.dependants(node.seqId)
+		slices.Sort(d)
+		sb.WriteString(fmt.Sprintf("%d -> %v\n", node.seqId, d))
+	}
+
 	return sb.String()
 }
 

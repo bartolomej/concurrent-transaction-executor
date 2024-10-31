@@ -49,35 +49,36 @@ func (e *Executor) ExecuteBlock(block executor.Block, state executor.AccountStat
 	}
 
 	dag := newDependencyDag(serExecNodes)
-	processingQueue := newDagChannelQueue()
-	executionState := newConcurrentExecutionAccountState(state)
+	queue := newChannelProcessingQueue()
+	execState := newConcurrentExecutionAccountState(state)
 
 	for i := 0; i < e.NWorkers; i++ {
-		go func(workerId int, queue <-chan dagQueueElement) {
+		go func(workerId int, queue <-chan processingUnit) {
 			for visited := range queue {
-				node := dag.lookup(visited.nodeId)
-				processDagQueueElement(node, dag, executionState)
-				visited.wg.Done()
+				node := dag.lookup(visited.seqId)
+				processUnit(node, dag, execState)
+				visited.done()
 			}
-		}(i, processingQueue.channel)
+		}(i, queue.queue)
 	}
 
-	dag.concurrentWalk(processingQueue)
+	dag.concurrentWalk(queue)
 
-	return executionState.UpdatedValues(), nil
+	return execState.UpdatedValues(), nil
 }
 
-func processDagQueueElement(
+func processUnit(
 	node *executionNode,
 	dag *dependencyDag,
 	state *concurrentExecutionAccountState,
 ) {
 	// No need to re-execute the transaction,
 	// as no other transaction can affect its dependencies
-	if len(dag.dependencies(node.seqId)) == 0 {
-		state.WriteUpdates(node.updates)
-		return
-	}
+	// TODO: We need a reference of past relationships here, but we are removing nodes from the DAG
+	//if len(dag.dependencies(node.seqId)) == 0 {
+	//	state.WriteUpdates(node.updates)
+	//	return
+	//}
 
 	reExecutedNode := execute(state, indexedTransaction{
 		index:       node.seqId,
@@ -90,7 +91,7 @@ func processDagQueueElement(
 	}
 
 	// TODO: if reads or updates changed, update the dag to "invalidate" descendant nodes
-	panic("unimplemented")
+	dag.update(reExecutedNode)
 }
 
 type indexedTransaction struct {
@@ -102,10 +103,11 @@ func execute(state executor.AccountState, tx indexedTransaction) *executionNode 
 	proxy := newStateProxy(state)
 	updates, err := tx.transaction.Updates(proxy)
 	return &executionNode{
-		seqId:   tx.index,
-		updates: updates,
-		reads:   proxy.reads(),
-		err:     err,
+		seqId:       tx.index,
+		updates:     updates,
+		reads:       proxy.reads(),
+		err:         err,
+		transaction: tx.transaction,
 	}
 }
 
