@@ -16,41 +16,39 @@ func NewExecutor(nWorkers int) *Executor {
 }
 
 func (e *Executor) ExecuteBlock(block executor.Block, state executor.AccountState) ([]executor.AccountValue, error) {
-	transactionsQueue := make(chan indexedTransaction)
-	executionReports := make(chan executionReport)
+	indexedTxs := make(chan indexedTransaction)
+	executionNodes := make(chan *executionNode)
 
 	wg := sync.WaitGroup{}
 	for i := 0; i < e.NWorkers; i++ {
-		worker := executionWorker{state: state}
 		go func(wg *sync.WaitGroup) {
 			wg.Add(1)
-			worker.execute(transactionsQueue, executionReports)
+			for itx := range indexedTxs {
+				executionNodes <- execute(state, itx)
+			}
 			wg.Done()
 		}(&wg)
 	}
 
 	for i, tx := range block.Transactions {
-		transactionsQueue <- indexedTransaction{
+		indexedTxs <- indexedTransaction{
 			index:       i,
 			transaction: tx,
 		}
 	}
-	close(transactionsQueue)
+	close(indexedTxs)
 
 	go func() {
 		wg.Wait()
-		close(executionReports)
+		close(executionNodes)
 	}()
 
-	reports := make([]executionReport, 0)
-	for report := range executionReports {
-		reports = append(reports, report)
+	serExecNodes := make([]*executionNode, 0)
+	for node := range executionNodes {
+		serExecNodes = append(serExecNodes, node)
 	}
-	slices.SortFunc(reports, func(a, b executionReport) int {
-		return a.index - b.index
-	})
 
-	dag := buildDependencyDag(reports)
+	dag := newDependencyDag(serExecNodes)
 	processingQueue := newDagChannelQueue()
 	executionState := newConcurrentExecutionAccountState(state)
 
@@ -58,9 +56,7 @@ func (e *Executor) ExecuteBlock(block executor.Block, state executor.AccountStat
 		go func(workerId int, queue <-chan dagQueueElement) {
 			for visited := range queue {
 				node := dag.lookup(visited.nodeId)
-				report := reports[visited.nodeId]
-				tx := block.Transactions[visited.nodeId]
-				processDagQueueElement(node, report, tx, executionState)
+				processDagQueueElement(node, dag, executionState)
 				visited.wg.Done()
 			}
 		}(i, processingQueue.channel)
@@ -72,32 +68,69 @@ func (e *Executor) ExecuteBlock(block executor.Block, state executor.AccountStat
 }
 
 func processDagQueueElement(
-	node *dependencyNode,
-	report executionReport,
-	tx executor.Transaction,
-	executionState *concurrentExecutionAccountState,
+	node *executionNode,
+	dag *dependencyDag,
+	state *concurrentExecutionAccountState,
 ) {
-	iTx := indexedTransaction{
-		index:       report.index,
-		transaction: tx,
-	}
-
 	// No need to re-execute the transaction,
 	// as no other transaction can affect its dependencies
-	if len(node.Dependencies) == 0 {
-		executionState.WriteUpdates(report.updates)
+	if len(dag.dependencies(node.seqId)) == 0 {
+		state.WriteUpdates(node.updates)
 		return
 	}
 
-	newReport := executeAndReport(executionState, iTx)
-	if slices.Equal(report.reads, newReport.reads) {
-		// TODO: Writing newReport.updates will only work if there are no descending dependants on the new updates
-		executionState.WriteUpdates(newReport.updates)
+	reExecutedNode := execute(state, indexedTransaction{
+		index:       node.seqId,
+		transaction: node.transaction,
+	})
+	if slices.Equal(node.reads, reExecutedNode.reads) {
+		// TODO: Writing reExecutedNode.updates will only work if there are no descending dependants on the new updates
+		state.WriteUpdates(reExecutedNode.updates)
 		return
 	}
 
 	// TODO: if reads or updates changed, update the dag to "invalidate" descendant nodes
 	panic("unimplemented")
+}
+
+type indexedTransaction struct {
+	index       int
+	transaction executor.Transaction
+}
+
+func execute(state executor.AccountState, tx indexedTransaction) *executionNode {
+	proxy := newStateProxy(state)
+	updates, err := tx.transaction.Updates(proxy)
+	return &executionNode{
+		seqId:   tx.index,
+		updates: updates,
+		reads:   proxy.reads(),
+		err:     err,
+	}
+}
+
+type stateProxy struct {
+	readsLookup map[string]bool
+	state       executor.AccountState
+}
+
+func newStateProxy(state executor.AccountState) *stateProxy {
+	return &stateProxy{readsLookup: make(map[string]bool), state: state}
+}
+
+func (s *stateProxy) GetAccount(name string) executor.AccountValue {
+	s.readsLookup[name] = true
+	return s.state.GetAccount(name)
+}
+
+func (s *stateProxy) reads() []string {
+	reads := make([]string, 0, len(s.readsLookup))
+	for read, _ := range s.readsLookup {
+		reads = append(reads, read)
+	}
+	// Sort so that comparisons with slices.Equal work
+	sort.Strings(reads)
+	return reads
 }
 
 type concurrentExecutionAccountState struct {
@@ -151,29 +184,4 @@ func (s *concurrentExecutionAccountState) UpdatedValues() []executor.AccountValu
 	})
 
 	return updatedValues
-}
-
-// buildDependencyDag produces a dependency DAG (Directed Acyclic Graph)
-// given an ordered (by index) list of execution reports
-func buildDependencyDag(reports []executionReport) *dependencyDag {
-	nodesByUpdate := make(map[string]map[int]bool)
-	dag := newDependencyDag(nil)
-	for _, report := range reports {
-		var dependencies []int
-		for _, read := range report.reads {
-			for id, _ := range nodesByUpdate[read] {
-				dependencies = append(dependencies, id)
-			}
-		}
-		dag.add(newDependencyNode(report.index, dependencies))
-		for _, update := range report.updates {
-			_, ok := nodesByUpdate[update.Name]
-			if !ok {
-				nodesByUpdate[update.Name] = make(map[int]bool)
-			}
-			nodesByUpdate[update.Name][report.index] = true
-		}
-	}
-
-	return dag
 }

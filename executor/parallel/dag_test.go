@@ -7,23 +7,23 @@ import (
 )
 
 func TestDag1(t *testing.T) {
-	orderedReports := []executionReport{
+	nodes := []*executionNode{
 		{
-			index: 0,
+			seqId: 0,
 			reads: []string{"A", "B"},
 			updates: []executor.AccountUpdate{
 				{Name: "A"},
 			},
 		},
 		{
-			index: 1,
+			seqId: 1,
 			reads: []string{"A"},
 			updates: []executor.AccountUpdate{
 				{Name: "B"},
 			},
 		},
 		{
-			index: 2,
+			seqId: 2,
 			reads: []string{"A", "B"},
 			updates: []executor.AccountUpdate{
 				{Name: "A"},
@@ -32,22 +32,25 @@ func TestDag1(t *testing.T) {
 		},
 	}
 
-	actual := buildDependencyDag(orderedReports)
+	actual := newDependencyDag(nodes)
 
-	expected := newDependencyDag([]*dependencyNode{
-		{
-			Id:           0,
-			Dependencies: []int{},
+	expected := &dependencyDag{
+		nodes: map[int]*executionNode{
+			0: nodes[0],
+			1: nodes[1],
+			2: nodes[2],
 		},
-		{
-			Id:           1,
-			Dependencies: []int{0},
+		dependantsById: map[int]map[int]bool{
+			0: {},
+			1: {0: true},
+			2: {0: true, 1: true},
 		},
-		{
-			Id:           2,
-			Dependencies: []int{0, 1},
+		dependenciesById: map[int]map[int]bool{
+			0: {1: true, 2: true},
+			1: {2: true},
+			2: {},
 		},
-	})
+	}
 
 	assertEqual(t, actual, expected)
 }
@@ -76,22 +79,28 @@ func (q *testDagQueue) close() {
 }
 
 func TestTopologicalOrder1(t *testing.T) {
-	dag := newDependencyDag([]*dependencyNode{
+	dag := newDependencyDag([]*executionNode{
 		{
-			Id:           0,
-			Dependencies: []int{},
+			seqId: 0,
+			reads: []string{"A"},
+			updates: []executor.AccountUpdate{
+				{Name: "A"},
+			},
 		},
 		{
-			Id:           1,
-			Dependencies: []int{0},
+			seqId: 1,
+			reads: []string{"A"},
+			updates: []executor.AccountUpdate{
+				{Name: "B"},
+			},
 		},
 		{
-			Id:           2,
-			Dependencies: []int{0},
+			seqId: 2,
+			reads: []string{"A"},
 		},
 		{
-			Id:           3,
-			Dependencies: []int{0, 1},
+			seqId: 3,
+			reads: []string{"A", "B"},
 		},
 	})
 

@@ -1,6 +1,7 @@
 package parallel
 
 import (
+	"blockchain/executor"
 	"fmt"
 	"slices"
 	"strconv"
@@ -10,59 +11,80 @@ import (
 
 // dependencyDag is a Directed Acyclic Graph that is not necessarily connected.
 type dependencyDag struct {
-	nodes map[int]*dependencyNode
-	// dependantsById tracks a list of dependant nodes (those who depend on the dependency node) for every node ID
+	nodes map[int]*executionNode
+	// dependantsById tracks a list of dependant nodes (reverse dependencies) for every node ID
 	dependantsById map[int]map[int]bool
+	// dependenciesById tracks a list of dependency nodes for every node ID
+	dependenciesById map[int]map[int]bool
 }
 
-func newDependencyDag(nodes []*dependencyNode) *dependencyDag {
+// buildDependencyDag produces a dependency DAG (Directed Acyclic Graph)
+// given an ordered (by index) list of execution reports
+func newDependencyDag(nodes []*executionNode) *dependencyDag {
+	slices.SortFunc(nodes, func(a, b *executionNode) int {
+		return a.seqId - b.seqId
+	})
+
+	seqIdsByUpdate := make(map[string]map[int]bool)
 	dag := &dependencyDag{
-		nodes:          make(map[int]*dependencyNode),
-		dependantsById: make(map[int]map[int]bool),
+		nodes:            make(map[int]*executionNode),
+		dependantsById:   make(map[int]map[int]bool),
+		dependenciesById: make(map[int]map[int]bool),
 	}
 
 	for _, node := range nodes {
-		dag.add(node)
+		depSeqIds := make(map[int]bool)
+		for _, read := range node.reads {
+			for seqId, _ := range seqIdsByUpdate[read] {
+				depSeqIds[seqId] = true
+			}
+		}
+		dag.dependenciesById[node.seqId] = depSeqIds
+
+		for depSeqId, _ := range depSeqIds {
+			_, ok := dag.dependantsById[depSeqId]
+			if !ok {
+				dag.dependantsById[depSeqId] = make(map[int]bool)
+			}
+			dag.dependantsById[depSeqId][node.seqId] = true
+		}
+
+		dag.nodes[node.seqId] = node
+
+		for _, update := range node.updates {
+			_, ok := seqIdsByUpdate[update.Name]
+			if !ok {
+				seqIdsByUpdate[update.Name] = make(map[int]bool)
+			}
+			seqIdsByUpdate[update.Name][node.seqId] = true
+		}
 	}
 
 	return dag
 }
 
-// add inserts the node in the graph
-// once a node is added is should not be updated or er-added
-func (dag *dependencyDag) add(node *dependencyNode) {
-	_, exists := dag.nodes[node.Id]
-	if exists {
-		panic("cannot add the same node twice")
-	}
-
-	dag.nodes[node.Id] = node
-
-	dag.updateLookups(node)
-}
-
-func (dag *dependencyDag) updateLookups(node *dependencyNode) {
-	for _, dep := range node.Dependencies {
-		_, ok := dag.dependantsById[dep]
-		if !ok {
-			dag.dependantsById[dep] = make(map[int]bool)
-		}
-		dag.dependantsById[dep][node.Id] = true
-	}
-}
-
-func (dag *dependencyDag) lookup(id int) *dependencyNode {
+func (dag *dependencyDag) lookup(id int) *executionNode {
 	return dag.nodes[id]
 }
 
 func (dag *dependencyDag) dependants(id int) []int {
-	var dependantsIds []int
+	var seqIds []int
 
 	for id, _ := range dag.dependantsById[id] {
-		dependantsIds = append(dependantsIds, id)
+		seqIds = append(seqIds, id)
 	}
 
-	return dependantsIds
+	return seqIds
+}
+
+func (dag *dependencyDag) dependencies(id int) []int {
+	var seqIds []int
+
+	for id, _ := range dag.dependenciesById[id] {
+		seqIds = append(seqIds, id)
+	}
+
+	return seqIds
 }
 
 type dagQueue interface {
@@ -97,7 +119,7 @@ func (dag *dependencyDag) concurrentWalk(processing dagQueue) {
 	q := make([]int, 0)
 	inDegreeById := make([]int, len(dag.nodes))
 	for id, node := range dag.nodes {
-		inDegreeById[id] = len(node.Dependencies)
+		inDegreeById[id] = len(dag.dependencies(node.seqId))
 	}
 
 	wg := sync.WaitGroup{}
@@ -145,12 +167,12 @@ func (dag *dependencyDag) concurrentWalk(processing dagQueue) {
 
 func (dag *dependencyDag) String() string {
 	sb := strings.Builder{}
-	sortedNodes := make([]*dependencyNode, 0, len(dag.nodes))
+	sortedNodes := make([]*executionNode, 0, len(dag.nodes))
 	for _, node := range dag.nodes {
 		sortedNodes = append(sortedNodes, node)
 	}
-	slices.SortFunc(sortedNodes, func(a, b *dependencyNode) int {
-		return a.Id - b.Id
+	slices.SortFunc(sortedNodes, func(a, b *executionNode) int {
+		return a.seqId - b.seqId
 	})
 	for _, node := range sortedNodes {
 		sb.WriteString(node.String())
@@ -159,27 +181,35 @@ func (dag *dependencyDag) String() string {
 	return sb.String()
 }
 
-type dependencyNode struct {
-	Id int
-	// Dependencies is a list of dependencies (their IDs)
-	Dependencies []int
+type executionNode struct {
+	// seqId is a unique identifier that also indicates the transaction order within a block
+	seqId int
+	// reads account names that were read by the transaction
+	reads []string
+	// updates account state changes that were produced by the transaction
+	updates []executor.AccountUpdate
+	// no updates were produced if err is set
+	err error
+	// transaction is the state transition function that produces reads, updates, err
+	transaction executor.Transaction
 }
 
-func newDependencyNode(id int, dependencies []int) *dependencyNode {
-	return &dependencyNode{
-		Id:           id,
-		Dependencies: dependencies,
+func (node *executionNode) String() string {
+	readNames := make([]string, len(node.reads))
+	for i, read := range node.reads {
+		readNames[i] = read
 	}
-}
 
-func (node dependencyNode) String() string {
-	deps := make([]string, len(node.Dependencies))
-	for i, dep := range node.Dependencies {
-		deps[i] = strconv.Itoa(dep)
+	updateEntries := make([]string, len(node.updates))
+	for i, update := range node.updates {
+		updateEntries[i] = update.Name + ":" + strconv.FormatInt(int64(update.BalanceChange), 10)
 	}
+
 	return fmt.Sprintf(
-		"Dependency{id:%s,deps:(%s)}",
-		strconv.Itoa(node.Id),
-		strings.Join(deps, ","),
+		"executionNode{seqId:%d,reads:%s,updates:%s,err:%v}",
+		node.seqId,
+		"("+strings.Join(readNames, ",")+")",
+		"("+strings.Join(updateEntries, ",")+")",
+		node.err,
 	)
 }
