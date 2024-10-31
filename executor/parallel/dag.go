@@ -189,24 +189,28 @@ func (dag *dependencyDag) concurrentWalk(queue processingQueue) {
 	awaitProcessing()
 
 	for len(q) > 0 {
-		seqId := q[0]
-		q = q[1:]
 
-		// Dependencies changed since last processing, delay removal.
-		// Node will be processed again at some future point,
-		// since it now depends on some other node that has yet to be traversed.
-		if len(dag.dependencies(seqId)) > 0 {
-			continue
-		}
+		n := len(q)
+		for i := 0; i < n; i++ {
+			seqId := q[i]
 
-		dependants := dag.dependants(seqId)
-		dag.remove(seqId)
+			// Dependencies changed since last processing, delay removal.
+			// Node will be processed again at some future point,
+			// since it now depends on some other node that has yet to be traversed.
+			if len(dag.dependencies(seqId)) > 0 {
+				continue
+			}
 
-		for _, depSeqId := range dependants {
-			if len(dag.dependencies(depSeqId)) == 0 {
-				schedule(depSeqId)
+			dependants := dag.dependants(seqId)
+			dag.remove(seqId)
+
+			for _, depSeqId := range dependants {
+				if len(dag.dependencies(depSeqId)) == 0 {
+					schedule(depSeqId)
+				}
 			}
 		}
+		q = q[n:]
 
 		awaitProcessing()
 	}

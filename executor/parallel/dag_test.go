@@ -52,7 +52,7 @@ func TestDag1(t *testing.T) {
 		},
 	}
 
-	assertEqual(t, actual, expected)
+	assertDagEqual(t, actual, expected)
 }
 
 func TestDagNodeRemoval(t *testing.T) {
@@ -99,10 +99,10 @@ func TestDagNodeRemoval(t *testing.T) {
 		},
 	}
 
-	assertEqual(t, actual, expected)
+	assertDagEqual(t, actual, expected)
 }
 
-func TestTopologicalOrder1(t *testing.T) {
+func TestConcurrentWalk1(t *testing.T) {
 	dag := newDependencyDag([]*executionNode{
 		{
 			seqId: 0,
@@ -143,19 +143,61 @@ func TestTopologicalOrder1(t *testing.T) {
 		{2, 3},
 		{4},
 	}
-	actual := testQueue.batches
 
-	if len(actual) != len(expected) {
-		t.Fatalf("wrong number of elements: expected %d, got %d", len(expected), len(actual))
+	assertQueueEqual(t, testQueue, expected)
+}
+
+// Verifies that long independent branches are visited concurrently
+func TestConcurrentWalk2(t *testing.T) {
+	dag := newDependencyDag([]*executionNode{
+		{
+			seqId: 0,
+			reads: []string{"A"},
+			updates: []api.AccountUpdate{
+				{Name: "B"},
+			},
+		},
+		{
+			seqId: 1,
+			reads: []string{"A"},
+			updates: []api.AccountUpdate{
+				{Name: "C"},
+			},
+		},
+		{
+			seqId: 2,
+			reads: []string{"B"},
+			updates: []api.AccountUpdate{
+				{Name: "D"},
+			},
+		},
+		{
+			seqId: 3,
+			reads: []string{"C"},
+			updates: []api.AccountUpdate{
+				{Name: "E"},
+			},
+		},
+		{
+			seqId: 4,
+			reads: []string{"D"},
+		},
+		{
+			seqId: 5,
+			reads: []string{"E"},
+		},
+	})
+
+	testQueue := newTestDagQueue()
+	dag.concurrentWalk(testQueue)
+
+	expected := [][]int{
+		{0, 1},
+		{2, 3},
+		{4, 5},
 	}
 
-	for i := range expected {
-		slices.Sort(actual[i])
-		slices.Sort(expected[i])
-		if !slices.Equal(actual[i], expected[i]) {
-			t.Errorf("actual[%d] %v != expected[%d] %v", i, actual[i], i, expected[i])
-		}
-	}
+	assertQueueEqual(t, testQueue, expected)
 }
 
 type testDagQueue struct {
@@ -183,8 +225,24 @@ func (q *testDagQueue) close() {
 
 var _ processingQueue = &testDagQueue{}
 
-func assertEqual(t *testing.T, actual, expected *dependencyDag) {
+func assertDagEqual(t *testing.T, actual, expected *dependencyDag) {
 	if actual.String() != expected.String() {
 		t.Errorf("actual %v, expected %v", actual, expected)
+	}
+}
+
+func assertQueueEqual(t *testing.T, actualQueue *testDagQueue, expected [][]int) {
+	actual := actualQueue.batches
+
+	if len(actual) != len(expected) {
+		t.Fatalf("wrong number of elements: expected %d, got %d", len(expected), len(actual))
+	}
+
+	for i := range expected {
+		slices.Sort(actual[i])
+		slices.Sort(expected[i])
+		if !slices.Equal(actual[i], expected[i]) {
+			t.Errorf("actual[%d] %v != expected[%d] %v", i, actual[i], i, expected[i])
+		}
 	}
 }
