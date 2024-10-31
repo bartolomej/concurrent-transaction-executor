@@ -21,7 +21,7 @@ type dependencyDag struct {
 }
 
 // buildDependencyDag produces a dependency DAG (Directed Acyclic Graph)
-// given an ordered (by index) list of execution reports
+// given an ordered (by seqId) list of execution reports
 func newDependencyDag(nodes []*executionNode) *dependencyDag {
 	dag := &dependencyDag{
 		nodes:            make(map[int]*executionNode),
@@ -277,7 +277,7 @@ type executionNode struct {
 	// no updates were produced if err is set
 	err error
 	// transaction is the state transition function that produces reads, updates, err
-	transaction api.Transaction
+	transaction *api.Transaction
 }
 
 func (node *executionNode) String() string {

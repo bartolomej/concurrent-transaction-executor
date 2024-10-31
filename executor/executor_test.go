@@ -6,6 +6,7 @@ import (
 	"blockchain/executor/serial"
 	"blockchain/transactions"
 	"fmt"
+	"sort"
 	"testing"
 	"time"
 )
@@ -150,6 +151,43 @@ func TestExecutorConditionalTransaction5(t *testing.T) {
 	assertExecution(t, expectedUpdateState, block, startState, parallel.NewExecutor(3), "parallel")
 }
 
+func TestParallelExecutionWithIndependentBranches(t *testing.T) {
+	branches := 100
+	txPerBranch := 1000
+
+	startState := make(testAccountState, 0)
+
+	var block api.Block
+	for i := 0; i < branches; i++ {
+		from := fmt.Sprintf("A_%d", i)
+		to := fmt.Sprintf("B_%d", i)
+		startState = append(startState, api.AccountValue{Name: from, Balance: uint(txPerBranch)})
+		startState = append(startState, api.AccountValue{Name: to, Balance: 0})
+
+		for j := 0; j < txPerBranch; j++ {
+			block.Transactions = append(block.Transactions, transactions.Transfer{
+				From:  from,
+				To:    to,
+				Value: 1,
+			})
+		}
+	}
+
+	var expectedUpdateState []api.AccountValue
+	for i := 0; i < branches; i++ {
+		from := fmt.Sprintf("A_%d", i)
+		to := fmt.Sprintf("B_%d", i)
+
+		expectedUpdateState = append(expectedUpdateState, api.AccountValue{Name: from, Balance: 0})
+		expectedUpdateState = append(expectedUpdateState, api.AccountValue{Name: to, Balance: uint(txPerBranch)})
+	}
+
+	// Note: A noticeable perf improvement for parallel execution is only visible
+	// when transactions are doing more intensive work (e.g. loops with 1000+ iterations or I/O)
+	assertExecution(t, expectedUpdateState, block, startState, serial.NewExecutor(), "serial")
+	assertExecution(t, expectedUpdateState, block, startState, parallel.NewExecutor(10), "parallel")
+}
+
 type longRunningTx struct {
 	duration  time.Duration
 	delayedTx api.Transaction
@@ -215,6 +253,13 @@ func assertExecution(
 	start := time.Now()
 	actualStateUpdate, err := executor.ExecuteBlock(block, startState)
 	elapsed := time.Since(start)
+
+	sort.Slice(actualStateUpdate, func(i, j int) bool {
+		return actualStateUpdate[i].Name < actualStateUpdate[j].Name
+	})
+	sort.Slice(expectedStateUpdate, func(i, j int) bool {
+		return expectedStateUpdate[i].Name < expectedStateUpdate[j].Name
+	})
 
 	fmt.Printf("Execution for %s took %s\n", label, elapsed)
 

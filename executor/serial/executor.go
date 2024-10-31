@@ -3,7 +3,6 @@ package serial
 import (
 	"blockchain/executor/api"
 	"fmt"
-	"sort"
 )
 
 type Executor struct{}
@@ -71,11 +70,6 @@ func (s *executorState) UpdatedAccountValues() []api.AccountValue {
 			Balance: v,
 		})
 	}
-
-	// TODO: Does ExecuteBlock need to return entries in a specific order?
-	sort.Slice(updatedValues, func(i, j int) bool {
-		return updatedValues[i].Name < updatedValues[j].Name
-	})
 
 	return updatedValues
 }

@@ -16,42 +16,44 @@ func NewExecutor(nWorkers int) *Executor {
 }
 
 func (e *Executor) ExecuteBlock(block api.Block, state api.AccountState) ([]api.AccountValue, error) {
-	indexedTxs := make(chan indexedTransaction)
-	executionNodes := make(chan *executionNode)
+	nTx := len(block.Transactions)
+	execNodeBatches := make([][]executionNode, e.NWorkers)
 
 	wg := sync.WaitGroup{}
 	for i := 0; i < e.NWorkers; i++ {
-		wg.Add(1)
-		go func(wg *sync.WaitGroup) {
-			for itx := range indexedTxs {
-				// Send on closed channel happens here
-				executionNodes <- execute(state, itx)
-			}
-			wg.Done()
-		}(&wg)
-	}
-
-	go func() {
-		for i, tx := range block.Transactions {
-			indexedTxs <- indexedTransaction{
-				index:       i,
-				transaction: tx,
-			}
+		startIdx := (nTx / e.NWorkers) * i
+		endIdx := startIdx + (nTx / e.NWorkers)
+		if i == e.NWorkers-1 {
+			endIdx = nTx
 		}
-		close(indexedTxs)
-	}()
 
-	go func() {
-		wg.Wait()
-		close(executionNodes)
-	}()
-
-	serExecNodes := make([]*executionNode, 0)
-	for node := range executionNodes {
-		serExecNodes = append(serExecNodes, node)
+		wg.Add(1)
+		go func(workerId int, wg *sync.WaitGroup) {
+			result := make([]executionNode, 0, endIdx-startIdx)
+			for idx := startIdx; idx < endIdx; idx++ {
+				itx := indexedTransaction{
+					seqId:       idx,
+					transaction: &block.Transactions[idx],
+				}
+				// TODO: Avg execution time is still up to 2x larger than for serial processing,
+				//  see if we can improve it (e.g. reduce scheduling overheat, allocation,...)
+				result = append(result, execute(state, itx))
+			}
+			execNodeBatches[workerId] = result
+			wg.Done()
+		}(i, &wg)
 	}
 
-	dag := newDependencyDag(serExecNodes)
+	wg.Wait()
+
+	execNodes := make([]*executionNode, 0)
+	for _, batch := range execNodeBatches {
+		for _, node := range batch {
+			execNodes = append(execNodes, &node)
+		}
+	}
+
+	dag := newDependencyDag(execNodes)
 	queue := newChannelProcessingQueue()
 	execState := newConcurrentExecutionAccountState(state)
 
@@ -84,7 +86,7 @@ func processUnit(
 	//}
 
 	reExecutedNode := execute(state, indexedTransaction{
-		index:       node.seqId,
+		seqId:       node.seqId,
 		transaction: node.transaction,
 	})
 	if slices.Equal(node.reads, reExecutedNode.reads) {
@@ -94,33 +96,30 @@ func processUnit(
 	}
 
 	// TODO: if reads or updates changed, update the dag to "invalidate" descendant nodes
-	dag.update(reExecutedNode)
+	dag.update(&reExecutedNode)
 }
 
 type indexedTransaction struct {
-	index       int
-	transaction api.Transaction
+	seqId       int
+	transaction *api.Transaction
 }
 
-func execute(state api.AccountState, tx indexedTransaction) *executionNode {
-	proxy := newStateProxy(state)
-	updates, err := tx.transaction.Updates(proxy)
-	return &executionNode{
-		seqId:       tx.index,
+func execute(state api.AccountState, itx indexedTransaction) executionNode {
+	proxy := stateProxy{readsLookup: make(map[string]bool), state: state}
+	updates, err := (*itx.transaction).Updates(&proxy)
+
+	return executionNode{
+		seqId:       itx.seqId,
 		updates:     updates,
 		reads:       proxy.reads(),
 		err:         err,
-		transaction: tx.transaction,
+		transaction: itx.transaction,
 	}
 }
 
 type stateProxy struct {
 	readsLookup map[string]bool
 	state       api.AccountState
-}
-
-func newStateProxy(state api.AccountState) *stateProxy {
-	return &stateProxy{readsLookup: make(map[string]bool), state: state}
 }
 
 func (s *stateProxy) GetAccount(name string) api.AccountValue {
@@ -182,11 +181,6 @@ func (s *concurrentExecutionAccountState) UpdatedValues() []api.AccountValue {
 	for _, v := range s.updatedState {
 		updatedValues = append(updatedValues, *v)
 	}
-
-	// TODO: Does ExecuteBlock need to return entries in a specific order?
-	sort.Slice(updatedValues, func(i, j int) bool {
-		return updatedValues[i].Name < updatedValues[j].Name
-	})
 
 	return updatedValues
 }
