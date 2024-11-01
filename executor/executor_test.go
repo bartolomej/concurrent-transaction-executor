@@ -157,6 +157,7 @@ func TestParallelExecutionWithIndependentBranches(t *testing.T) {
 
 	startState := make(testAccountState, 0)
 
+	// TODO: build a tree-like dependency structure
 	var block api.Block
 	for i := 0; i < branches; i++ {
 		from := fmt.Sprintf("A_%d", i)
@@ -264,8 +265,13 @@ func assertExecution(
 	fmt.Printf("Execution for %s took %s\n", label, elapsed)
 
 	if err != nil {
-		t.Error(err)
+		t.Errorf("unexpected error while executing block: %e", err)
 	}
+
+	if len(expectedStateUpdate) != len(actualStateUpdate) {
+		t.Fatalf("expected %d updates, but got %d", len(expectedStateUpdate), len(actualStateUpdate))
+	}
+
 	for i, expected := range expectedStateUpdate {
 		actual := actualStateUpdate[i]
 		if expected.Name != actual.Name {

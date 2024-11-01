@@ -111,7 +111,10 @@ func (dag *dependencyDag) dependencies(id int) []int {
 	return seqIds
 }
 
-func (dag *dependencyDag) update(newNode *executionNode) {
+// update the DAG (if needed) with the re-executed execution node
+// returns true if graph was updated, false otherwise
+// if graph wasn't updated, the state changes can be commited
+func (dag *dependencyDag) update(newNode *executionNode) bool {
 	dag.mu.Lock()
 	defer dag.mu.Unlock()
 
@@ -121,10 +124,15 @@ func (dag *dependencyDag) update(newNode *executionNode) {
 		panic("cannot call update for new nodes")
 	}
 
+	if oldNode.readsEqual(newNode) && oldNode.updatesEqual(newNode) {
+		return false
+	}
+
 	dag.nodes[newNode.seqId] = newNode
 
-	// TODO: Optimize graph updates by not rebuilding the graph from scratch
 	dag.computeEdges()
+
+	return true
 }
 
 type processingQueue interface {
@@ -153,6 +161,34 @@ func (q *channelProcessingQueue) close() {
 type processingUnit struct {
 	seqId int
 	done  func()
+}
+
+func (dag *dependencyDag) execute(state *executionAccountState, nWorkers int) {
+	queue := newChannelProcessingQueue()
+
+	for i := 0; i < nWorkers; i++ {
+		go func(workerId int, queue <-chan processingUnit) {
+			for visited := range queue {
+				node := dag.lookup(visited.seqId)
+
+				reExecutedNode := executeTransaction(state, node.seqId, *node.transaction)
+
+				// TODO: If node had no dependencies ever, we can immediately write the updates to state,
+				// 	since no other node can ever impact the result of the execution.
+
+				// TODO: Should we handle read and updates changes separately?
+				isDagUpdated := dag.update(&reExecutedNode)
+
+				if !isDagUpdated {
+					state.WriteUpdates(reExecutedNode.updates)
+				}
+
+				visited.done()
+			}
+		}(i, queue.queue)
+	}
+
+	dag.concurrentWalk(queue)
 }
 
 func (dag *dependencyDag) concurrentWalk(queue processingQueue) {
@@ -278,6 +314,20 @@ type executionNode struct {
 	err error
 	// transaction is the state transition function that produces reads, updates, err
 	transaction *api.Transaction
+}
+
+func (node *executionNode) readsEqual(other *executionNode) bool {
+	return slices.Equal(node.reads, other.reads)
+}
+
+func (node *executionNode) updatesEqual(other *executionNode) bool {
+	return slices.EqualFunc(
+		node.updates,
+		other.updates,
+		func(a api.AccountUpdate, b api.AccountUpdate) bool {
+			return a.Name == b.Name
+		},
+	)
 }
 
 func (node *executionNode) String() string {
