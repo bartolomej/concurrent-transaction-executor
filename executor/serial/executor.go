@@ -42,7 +42,7 @@ func (s *executorState) GetAccount(name string) api.AccountValue {
 	_, ok := s.uncommitedBalancesByName[name]
 
 	if !ok {
-		s.initAccount(name)
+		return s.startState.GetAccount(name)
 	}
 
 	return api.AccountValue{Name: name, Balance: s.uncommitedBalancesByName[name]}
@@ -52,14 +52,10 @@ func (s *executorState) ApplyUpdates(updates []api.AccountUpdate) {
 	for _, u := range updates {
 		_, ok := s.uncommitedBalancesByName[u.Name]
 		if !ok {
-			s.initAccount(u.Name)
+			s.uncommitedBalancesByName[u.Name] = s.startState.GetAccount(u.Name).Balance
 		}
 		s.uncommitedBalancesByName[u.Name] += uint(u.BalanceChange)
 	}
-}
-
-func (s *executorState) initAccount(name string) {
-	s.uncommitedBalancesByName[name] = s.startState.GetAccount(name).Balance
 }
 
 func (s *executorState) UpdatedAccountValues() []api.AccountValue {

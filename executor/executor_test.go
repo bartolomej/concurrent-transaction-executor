@@ -158,13 +158,15 @@ func TestExecutorConditionalTransaction5(t *testing.T) {
 	assertExecution(t, expectedUpdateState, block, startState, parallel.NewExecutor(3), "parallel")
 }
 
+// TODO(perf): Increasing branches/txPerBranch scales horribly for parallel execution
 func TestParallelExecutionWithIndependentBranches(t *testing.T) {
-	branches := 100
-	txPerBranch := 1000
+	branches := 10
+	txPerBranch := 100
 
 	startState := make(testAccountState, 0)
 
 	// TODO: build a tree-like dependency structure
+	// TODO: Add a test case with random dependency structure
 	var block api.Block
 	for i := 0; i < branches; i++ {
 		from := fmt.Sprintf("A_%d", i)

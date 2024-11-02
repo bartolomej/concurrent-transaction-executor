@@ -22,6 +22,7 @@ func newExecutionAccountState(oldState api.AccountState) *executionAccountState 
 func (s *executionAccountState) GetAccount(name string) api.AccountValue {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	if v, ok := s.updatedState[name]; ok {
 		return *v
 	} else {
@@ -29,18 +30,36 @@ func (s *executionAccountState) GetAccount(name string) api.AccountValue {
 	}
 }
 
-func (s *executionAccountState) WriteUpdates(updates []api.AccountUpdate) {
+func (s *executionAccountState) ApplyUpdates(updates []api.AccountUpdate) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	for _, update := range updates {
-		v, ok := s.updatedState[update.Name]
-		if ok {
-			v.Balance += uint(update.BalanceChange)
-		} else {
-			s.updatedState[update.Name] = &api.AccountValue{
-				Name:    update.Name,
-				Balance: s.oldState.GetAccount(update.Name).Balance + uint(update.BalanceChange),
-			}
+		s.write(update)
+	}
+}
+
+func (s *executionAccountState) RevertUpdates(updates []api.AccountUpdate) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, update := range updates {
+		inverseUpdate := api.AccountUpdate{
+			Name:          update.Name,
+			BalanceChange: -update.BalanceChange,
+		}
+		s.write(inverseUpdate)
+	}
+}
+
+func (s *executionAccountState) write(update api.AccountUpdate) {
+	v, ok := s.updatedState[update.Name]
+	if ok {
+		v.Balance += uint(update.BalanceChange)
+	} else {
+		s.updatedState[update.Name] = &api.AccountValue{
+			Name:    update.Name,
+			Balance: s.oldState.GetAccount(update.Name).Balance + uint(update.BalanceChange),
 		}
 	}
 }

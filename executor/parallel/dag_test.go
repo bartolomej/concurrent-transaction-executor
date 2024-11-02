@@ -242,10 +242,10 @@ func newTestDagQueue() *testDagQueue {
 	}
 }
 
-func (q *testDagQueue) process(units []processingUnit) {
+func (q *testDagQueue) process(units []processingTask) {
 	idBatch := make([]int, 0)
 	for _, unit := range units {
-		idBatch = append(idBatch, unit.seqId)
+		idBatch = append(idBatch, unit.nodeSeqId)
 		unit.done()
 	}
 	q.batches = append(q.batches, idBatch)

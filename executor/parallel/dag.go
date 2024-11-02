@@ -21,7 +21,7 @@ type dependencyDag struct {
 }
 
 // buildDependencyDag produces a dependency DAG (Directed Acyclic Graph)
-// given an ordered (by seqId) list of execution reports
+// given an ordered (by nodeSeqId) list of execution reports
 func newDependencyDag(nodes []*executionNode) *dependencyDag {
 	dag := &dependencyDag{
 		nodes:            make(map[int]*executionNode),
@@ -155,19 +155,19 @@ func (dag *dependencyDag) update(newNode *executionNode) updateDiff {
 }
 
 type processingQueue interface {
-	process([]processingUnit)
+	process([]processingTask)
 	close()
 }
 
 type channelProcessingQueue struct {
-	queue chan processingUnit
+	queue chan processingTask
 }
 
 func newChannelProcessingQueue() *channelProcessingQueue {
-	return &channelProcessingQueue{queue: make(chan processingUnit)}
+	return &channelProcessingQueue{queue: make(chan processingTask)}
 }
 
-func (q *channelProcessingQueue) process(units []processingUnit) {
+func (q *channelProcessingQueue) process(units []processingTask) {
 	for _, unit := range units {
 		q.queue <- unit
 	}
@@ -177,35 +177,38 @@ func (q *channelProcessingQueue) close() {
 	close(q.queue)
 }
 
-type processingUnit struct {
-	seqId int
-	done  func()
+type processingTask struct {
+	nodeSeqId         int
+	done              func()
+	markNodeUnvisited func(seqId int)
 }
 
 func (dag *dependencyDag) execute(state *executionAccountState, nWorkers int) {
 	queue := newChannelProcessingQueue()
 
 	for i := 0; i < nWorkers; i++ {
-		go func(workerId int, queue <-chan processingUnit) {
-			for visited := range queue {
-				node := dag.lookup(visited.seqId)
+		go func(workerId int, queue <-chan processingTask) {
+			for task := range queue {
+				node := dag.lookup(task.nodeSeqId)
 
 				reExecutedNode := executeTransaction(state, node.seqId, *node.transaction)
 
 				diff := dag.update(reExecutedNode)
 
-				for _, newDependant := range diff.newDependants {
-					// TODO: Revert state for impacted nodes (in case they were already executed) & reprocess
-					fmt.Printf("new update: %v\n", newDependant)
+				for _, seqId := range diff.newDependants {
+					// TODO: Do the same for all descendant nodes of the dependant
+					newDependant := dag.lookup(seqId)
+					state.RevertUpdates(newDependant.updates)
+					task.markNodeUnvisited(seqId)
 				}
 
 				if len(diff.newDependencies) == 0 {
-					state.WriteUpdates(reExecutedNode.updates)
+					state.ApplyUpdates(reExecutedNode.updates)
 				} else {
-					// TODO: Mark dirty/unvisited (reschedule for processing)
+					task.markNodeUnvisited(reExecutedNode.seqId)
 				}
 
-				visited.done()
+				task.done()
 			}
 		}(i, queue.queue)
 	}
@@ -213,14 +216,14 @@ func (dag *dependencyDag) execute(state *executionAccountState, nWorkers int) {
 	dag.concurrentWalk(queue)
 }
 
-// TODO: Refactor this into a DagWalker struct
+// TODO(cleanup): Refactor this into a DagWalker struct
 func (dag *dependencyDag) concurrentWalk(queue processingQueue) {
 	// nodes in the queue were already processed
 	// and are waiting to be traversed to process their dependants
 	q := make([]int, 0)
 	wg := sync.WaitGroup{}
-	batch := make([]processingUnit, 0)
-	visited := make(map[int]bool)
+	batch := make([]processingTask, 0)
+	visited := make([]bool, len(dag.nodes))
 
 	unvisitedDependencies := func(seqId int) []int {
 		unvisited := make([]int, 0)
@@ -242,10 +245,15 @@ func (dag *dependencyDag) concurrentWalk(queue processingQueue) {
 	}
 	schedule := func(seqId int) {
 		wg.Add(1)
-		batch = append(batch, processingUnit{
-			seqId: seqId,
+		batch = append(batch, processingTask{
+			nodeSeqId: seqId,
 			done: func() {
 				wg.Done()
+			},
+			markNodeUnvisited: func(seqId int) {
+				// TODO(verify): Is this true?
+				// Can be called concurrently for different nodeSeqId values
+				visited[seqId] = false
 			},
 		})
 		q = append(q, seqId)
@@ -253,7 +261,7 @@ func (dag *dependencyDag) concurrentWalk(queue processingQueue) {
 	awaitProcessing := func() {
 		if len(batch) > 0 {
 			queue.process(batch)
-			batch = make([]processingUnit, 0)
+			batch = make([]processingTask, 0)
 			wg.Wait()
 		}
 	}
@@ -353,7 +361,7 @@ func (node *executionNode) String() string {
 	}
 
 	return fmt.Sprintf(
-		"executionNode{seqId:%d,reads:%s,updates:%s,err:%v}",
+		"executionNode{nodeSeqId:%d,reads:%s,updates:%s,err:%v}",
 		node.seqId,
 		"("+strings.Join(readNames, ",")+")",
 		"("+strings.Join(updateEntries, ",")+")",

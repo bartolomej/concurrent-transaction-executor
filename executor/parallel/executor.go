@@ -41,7 +41,7 @@ func (e *Executor) executeOptimistically(transactions []api.Transaction, state a
 		go func(workerId int, wg *sync.WaitGroup) {
 			nodeBatch := make([]*executionNode, 0, endSeqId-startSeqId)
 			for seqId := startSeqId; seqId < endSeqId; seqId++ {
-				// TODO: Avg execution time is sometimes still up to 2x larger than for serial processing,
+				// TODO(perf): Avg execution time is sometimes still up to 2x larger than for serial processing,
 				//  see if we can improve it (e.g. reduce scheduling overheat, allocation,...)
 				nodeBatch = append(nodeBatch, executeTransaction(state, seqId, transactions[seqId]))
 			}
