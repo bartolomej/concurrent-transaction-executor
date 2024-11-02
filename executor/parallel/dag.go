@@ -39,6 +39,7 @@ func newDependencyDag(nodes []*executionNode) *dependencyDag {
 }
 
 func (dag *dependencyDag) computeEdges() {
+	seqIdsByRead := make(map[string]map[int]bool)
 	seqIdsByUpdate := make(map[string]map[int]bool)
 
 	orderedNodes := make([]*executionNode, 0, len(dag.nodes))
@@ -53,6 +54,11 @@ func (dag *dependencyDag) computeEdges() {
 		dependencies := make(map[int]bool)
 		for _, read := range node.reads {
 			for seqId, _ := range seqIdsByUpdate[read] {
+				dependencies[seqId] = true
+			}
+		}
+		for _, update := range node.updates {
+			for seqId, _ := range seqIdsByRead[update.Name] {
 				dependencies[seqId] = true
 			}
 		}
@@ -74,6 +80,14 @@ func (dag *dependencyDag) computeEdges() {
 				seqIdsByUpdate[update.Name] = make(map[int]bool)
 			}
 			seqIdsByUpdate[update.Name][node.seqId] = true
+		}
+
+		for _, read := range node.reads {
+			_, ok := seqIdsByRead[read]
+			if !ok {
+				seqIdsByRead[read] = make(map[int]bool)
+			}
+			seqIdsByRead[read][node.seqId] = true
 		}
 	}
 }
@@ -173,12 +187,13 @@ func (dag *dependencyDag) execute(state *executionAccountState, nWorkers int) {
 				node := dag.lookup(visited.seqId)
 
 				// TODO: Add test case
+				// TODO: This isn't always true - node without dependencies can have dependencies in the next execution
 				// commit updates immediately as no other node can ever impact the result of the execution
-				if len(node.reads) == 0 {
-					state.WriteUpdates(node.updates)
-					visited.done()
-					continue
-				}
+				//if len(node.reads) == 0 {
+				//	state.WriteUpdates(node.updates)
+				//	visited.done()
+				//	continue
+				//}
 
 				reExecutedNode := executeTransaction(state, node.seqId, *node.transaction)
 

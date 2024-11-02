@@ -55,7 +55,6 @@ func TestDag1(t *testing.T) {
 	assertDagEqual(t, actual, expected)
 }
 
-// Tests the initial dag state seen in TestExecutorTransferTransaction3
 func TestDag2(t *testing.T) {
 	nodes := []*executionNode{
 		{
@@ -79,10 +78,14 @@ func TestDag2(t *testing.T) {
 			reads:   []string{"B"},
 			updates: []api.AccountUpdate{},
 		},
+		// If N+1 node updates state that N node reads,
+		// N+1 node must be scheduled after N, since it can affect its output.
 		{
-			seqId:   3,
-			reads:   []string{"D"},
-			updates: []api.AccountUpdate{},
+			seqId: 3,
+			reads: []string{"D"},
+			updates: []api.AccountUpdate{
+				{Name: "B"},
+			},
 		},
 	}
 
@@ -100,6 +103,9 @@ func TestDag2(t *testing.T) {
 				1: true,
 				2: true,
 			},
+			2: {
+				3: true,
+			},
 		},
 		dependenciesById: map[int]map[int]bool{
 			1: {
@@ -108,7 +114,9 @@ func TestDag2(t *testing.T) {
 			2: {
 				0: true,
 			},
-			3: {},
+			3: {
+				2: true,
+			},
 		},
 	}
 
@@ -118,8 +126,9 @@ func TestDag2(t *testing.T) {
 	actual.concurrentWalk(testQueue)
 
 	expectedWalkOrder := [][]int{
-		{0, 3},
+		{0},
 		{1, 2},
+		{3},
 	}
 
 	assertQueueEqual(t, testQueue, expectedWalkOrder)
