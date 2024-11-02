@@ -93,6 +93,7 @@ func (dag *dependencyDag) computeEdges() {
 }
 
 func (dag *dependencyDag) lookup(id int) *executionNode {
+	// TODO: Move locking responsibility to the caller?
 	dag.mu.RLock()
 	defer dag.mu.RUnlock()
 
@@ -100,9 +101,6 @@ func (dag *dependencyDag) lookup(id int) *executionNode {
 }
 
 func (dag *dependencyDag) dependants(seqId int) []int {
-	dag.mu.RLock()
-	defer dag.mu.RUnlock()
-
 	var seqIds []int
 
 	for id, _ := range dag.dependantsById[seqId] {
@@ -113,9 +111,6 @@ func (dag *dependencyDag) dependants(seqId int) []int {
 }
 
 func (dag *dependencyDag) dependencies(seqId int) []int {
-	dag.mu.RLock()
-	defer dag.mu.RUnlock()
-
 	var seqIds []int
 
 	for id, _ := range dag.dependenciesById[seqId] {
@@ -125,10 +120,14 @@ func (dag *dependencyDag) dependencies(seqId int) []int {
 	return seqIds
 }
 
+type updateDiff struct {
+	newDependants   []int
+	newDependencies []int
+}
+
 // update the DAG (if needed) with the re-executed execution node
-// returns true if graph was updated, false otherwise
-// if graph wasn't updated, the state changes can be commited
-func (dag *dependencyDag) update(newNode *executionNode) bool {
+// returns the newly added dependencies/dependants for the new node
+func (dag *dependencyDag) update(newNode *executionNode) updateDiff {
 	dag.mu.Lock()
 	defer dag.mu.Unlock()
 
@@ -138,16 +137,21 @@ func (dag *dependencyDag) update(newNode *executionNode) bool {
 		panic("cannot call update for new nodes")
 	}
 
-	if oldNode.readsEqual(newNode) && oldNode.updatesEqual(newNode) {
-		return false
-	}
-
 	dag.nodes[newNode.seqId] = newNode
 
-	// TODO: Lazily (e.g. before write) or incrementally (without rebuilding the whole graph) compute edges
+	beforeDependants := dag.dependants(newNode.seqId)
+	beforeDependencies := dag.dependencies(newNode.seqId)
+
+	// TODO(perf): Incrementally (without rebuilding the whole graph) compute edges
 	dag.computeEdges()
 
-	return true
+	afterDependants := dag.dependants(newNode.seqId)
+	afterDependencies := dag.dependencies(newNode.seqId)
+
+	return updateDiff{
+		newDependants:   subtract(afterDependants, beforeDependants),
+		newDependencies: subtract(afterDependencies, beforeDependencies),
+	}
 }
 
 type processingQueue interface {
@@ -186,22 +190,19 @@ func (dag *dependencyDag) execute(state *executionAccountState, nWorkers int) {
 			for visited := range queue {
 				node := dag.lookup(visited.seqId)
 
-				// TODO: Add test case
-				// TODO: This isn't always true - node without dependencies can have dependencies in the next execution
-				// commit updates immediately as no other node can ever impact the result of the execution
-				//if len(node.reads) == 0 {
-				//	state.WriteUpdates(node.updates)
-				//	visited.done()
-				//	continue
-				//}
-
 				reExecutedNode := executeTransaction(state, node.seqId, *node.transaction)
 
-				// TODO: Should we handle read and updates changes separately?
-				isDagUpdated := dag.update(reExecutedNode)
+				diff := dag.update(reExecutedNode)
 
-				if !isDagUpdated {
+				for _, newDependant := range diff.newDependants {
+					// TODO: Revert state for impacted nodes (in case they were already executed) & reprocess
+					fmt.Printf("new update: %v\n", newDependant)
+				}
+
+				if len(diff.newDependencies) == 0 {
 					state.WriteUpdates(reExecutedNode.updates)
+				} else {
+					// TODO: Mark dirty/unvisited (reschedule for processing)
 				}
 
 				visited.done()
@@ -340,20 +341,6 @@ type executionNode struct {
 	transaction *api.Transaction
 }
 
-func (node *executionNode) readsEqual(other *executionNode) bool {
-	return slices.Equal(node.reads, other.reads)
-}
-
-func (node *executionNode) updatesEqual(other *executionNode) bool {
-	return slices.EqualFunc(
-		node.updates,
-		other.updates,
-		func(a api.AccountUpdate, b api.AccountUpdate) bool {
-			return a.Name == b.Name
-		},
-	)
-}
-
 func (node *executionNode) String() string {
 	readNames := make([]string, len(node.reads))
 	for i, read := range node.reads {
@@ -372,4 +359,19 @@ func (node *executionNode) String() string {
 		"("+strings.Join(updateEntries, ",")+")",
 		node.err,
 	)
+}
+
+// subtract returns integers that are in first but not second array
+func subtract(first, second []int) []int {
+	var sub []int
+outer:
+	for _, a := range first {
+		for _, b := range second {
+			if a == b {
+				continue outer
+			}
+		}
+		sub = append(sub, a)
+	}
+	return sub
 }
