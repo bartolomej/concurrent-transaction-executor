@@ -134,53 +134,6 @@ func TestDag2(t *testing.T) {
 	assertQueueEqual(t, testQueue, expectedWalkOrder)
 }
 
-func TestDagNodeRemoval(t *testing.T) {
-	nodes := []*executionNode{
-		{
-			seqId: 0,
-			reads: []string{"A", "B"},
-			updates: []api.AccountUpdate{
-				{Name: "A"},
-			},
-		},
-		{
-			seqId: 1,
-			reads: []string{"A"},
-			updates: []api.AccountUpdate{
-				{Name: "B"},
-			},
-		},
-		{
-			seqId: 2,
-			reads: []string{"A", "B"},
-			updates: []api.AccountUpdate{
-				{Name: "A"},
-				{Name: "B"},
-			},
-		},
-	}
-
-	actual := newDependencyDag(nodes)
-	actual.remove(1)
-
-	expected := &dependencyDag{
-		nodes: map[int]*executionNode{
-			0: nodes[0],
-			2: nodes[2],
-		},
-		dependantsById: map[int]map[int]bool{
-			0: {2: true},
-			2: {},
-		},
-		dependenciesById: map[int]map[int]bool{
-			0: {},
-			2: {0: true},
-		},
-	}
-
-	assertDagEqual(t, actual, expected)
-}
-
 func TestConcurrentWalk1(t *testing.T) {
 	dag := newDependencyDag([]*executionNode{
 		{

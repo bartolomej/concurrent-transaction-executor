@@ -99,26 +99,26 @@ func (dag *dependencyDag) lookup(id int) *executionNode {
 	return dag.nodes[id]
 }
 
-func (dag *dependencyDag) dependants(id int) []int {
+func (dag *dependencyDag) dependants(seqId int) []int {
 	dag.mu.RLock()
 	defer dag.mu.RUnlock()
 
 	var seqIds []int
 
-	for id, _ := range dag.dependantsById[id] {
+	for id, _ := range dag.dependantsById[seqId] {
 		seqIds = append(seqIds, id)
 	}
 
 	return seqIds
 }
 
-func (dag *dependencyDag) dependencies(id int) []int {
+func (dag *dependencyDag) dependencies(seqId int) []int {
 	dag.mu.RLock()
 	defer dag.mu.RUnlock()
 
 	var seqIds []int
 
-	for id, _ := range dag.dependenciesById[id] {
+	for id, _ := range dag.dependenciesById[seqId] {
 		seqIds = append(seqIds, id)
 	}
 
@@ -212,13 +212,33 @@ func (dag *dependencyDag) execute(state *executionAccountState, nWorkers int) {
 	dag.concurrentWalk(queue)
 }
 
+// TODO: Refactor this into a DagWalker struct
 func (dag *dependencyDag) concurrentWalk(queue processingQueue) {
 	// nodes in the queue were already processed
 	// and are waiting to be traversed to process their dependants
 	q := make([]int, 0)
 	wg := sync.WaitGroup{}
 	batch := make([]processingUnit, 0)
+	visited := make(map[int]bool)
 
+	unvisitedDependencies := func(seqId int) []int {
+		unvisited := make([]int, 0)
+		for _, depSeqId := range dag.dependencies(seqId) {
+			if !visited[depSeqId] {
+				unvisited = append(unvisited, depSeqId)
+			}
+		}
+		return unvisited
+	}
+	unvisitedDependants := func(seqId int) []int {
+		unvisited := make([]int, 0)
+		for _, depSeqId := range dag.dependants(seqId) {
+			if !visited[depSeqId] {
+				unvisited = append(unvisited, depSeqId)
+			}
+		}
+		return unvisited
+	}
 	schedule := func(seqId int) {
 		wg.Add(1)
 		batch = append(batch, processingUnit{
@@ -254,15 +274,15 @@ func (dag *dependencyDag) concurrentWalk(queue processingQueue) {
 			// Dependencies changed since last processing, delay removal.
 			// Node will be processed again at some future point,
 			// since it now depends on some other node that has yet to be traversed.
-			if len(dag.dependencies(seqId)) > 0 {
+			if len(unvisitedDependencies(seqId)) > 0 {
 				continue
 			}
 
-			dependants := dag.dependants(seqId)
-			dag.remove(seqId)
+			dependants := unvisitedDependants(seqId)
+			visited[seqId] = true
 
 			for _, depSeqId := range dependants {
-				if len(dag.dependencies(depSeqId)) == 0 {
+				if len(unvisitedDependencies(depSeqId)) == 0 {
 					schedule(depSeqId)
 				}
 			}
@@ -273,23 +293,6 @@ func (dag *dependencyDag) concurrentWalk(queue processingQueue) {
 	}
 
 	queue.close()
-}
-
-// remove the node and it's edges from the graph
-func (dag *dependencyDag) remove(seqId int) {
-	dag.mu.Lock()
-	defer dag.mu.Unlock()
-
-	for depSeqId := range dag.dependantsById[seqId] {
-		delete(dag.dependenciesById[depSeqId], seqId)
-	}
-	for depSeqId := range dag.dependenciesById[seqId] {
-		delete(dag.dependantsById[depSeqId], seqId)
-	}
-
-	delete(dag.dependenciesById, seqId)
-	delete(dag.dependantsById, seqId)
-	delete(dag.nodes, seqId)
 }
 
 func (dag *dependencyDag) String() string {
