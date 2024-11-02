@@ -55,6 +55,76 @@ func TestDag1(t *testing.T) {
 	assertDagEqual(t, actual, expected)
 }
 
+// Tests the initial dag state seen in TestExecutorTransferTransaction3
+func TestDag2(t *testing.T) {
+	nodes := []*executionNode{
+		{
+			seqId: 0,
+			reads: []string{"A"},
+			updates: []api.AccountUpdate{
+				{Name: "A", BalanceChange: -10},
+				{Name: "B", BalanceChange: 10},
+			},
+		},
+		{
+			seqId: 1,
+			reads: []string{"A"},
+			updates: []api.AccountUpdate{
+				{Name: "A", BalanceChange: -10},
+				{Name: "C", BalanceChange: 10},
+			},
+		},
+		{
+			seqId:   2,
+			reads:   []string{"B"},
+			updates: []api.AccountUpdate{},
+		},
+		{
+			seqId:   3,
+			reads:   []string{"D"},
+			updates: []api.AccountUpdate{},
+		},
+	}
+
+	actual := newDependencyDag(nodes)
+
+	expected := &dependencyDag{
+		nodes: map[int]*executionNode{
+			0: nodes[0],
+			1: nodes[1],
+			2: nodes[2],
+			3: nodes[3],
+		},
+		dependantsById: map[int]map[int]bool{
+			0: {
+				1: true,
+				2: true,
+			},
+		},
+		dependenciesById: map[int]map[int]bool{
+			1: {
+				0: true,
+			},
+			2: {
+				0: true,
+			},
+			3: {},
+		},
+	}
+
+	assertDagEqual(t, actual, expected)
+
+	testQueue := newTestDagQueue()
+	actual.concurrentWalk(testQueue)
+
+	expectedWalkOrder := [][]int{
+		{0, 3},
+		{1, 2},
+	}
+
+	assertQueueEqual(t, testQueue, expectedWalkOrder)
+}
+
 func TestDagNodeRemoval(t *testing.T) {
 	nodes := []*executionNode{
 		{

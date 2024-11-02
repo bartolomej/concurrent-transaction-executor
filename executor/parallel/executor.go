@@ -27,7 +27,7 @@ func (e *Executor) ExecuteBlock(block api.Block, state api.AccountState) ([]api.
 
 func (e *Executor) executeOptimistically(transactions []api.Transaction, state api.AccountState) []*executionNode {
 	nTx := len(transactions)
-	nodeBatches := make([][]executionNode, e.NWorkers)
+	nodeBatches := make([][]*executionNode, e.NWorkers)
 
 	wg := sync.WaitGroup{}
 	for i := 0; i < e.NWorkers; i++ {
@@ -39,7 +39,7 @@ func (e *Executor) executeOptimistically(transactions []api.Transaction, state a
 
 		wg.Add(1)
 		go func(workerId int, wg *sync.WaitGroup) {
-			nodeBatch := make([]executionNode, 0, endSeqId-startSeqId)
+			nodeBatch := make([]*executionNode, 0, endSeqId-startSeqId)
 			for seqId := startSeqId; seqId < endSeqId; seqId++ {
 				// TODO: Avg execution time is sometimes still up to 2x larger than for serial processing,
 				//  see if we can improve it (e.g. reduce scheduling overheat, allocation,...)
@@ -52,21 +52,21 @@ func (e *Executor) executeOptimistically(transactions []api.Transaction, state a
 
 	wg.Wait()
 
-	nodes := make([]*executionNode, 0)
+	nodes := make([]*executionNode, 0, len(transactions))
 	for _, batch := range nodeBatches {
 		for _, node := range batch {
-			nodes = append(nodes, &node)
+			nodes = append(nodes, node)
 		}
 	}
 
 	return nodes
 }
 
-func executeTransaction(state api.AccountState, seqId int, transaction api.Transaction) executionNode {
+func executeTransaction(state api.AccountState, seqId int, transaction api.Transaction) *executionNode {
 	proxy := stateProxy{readsLookup: make(map[string]bool), state: state}
 	updates, err := transaction.Updates(&proxy)
 
-	return executionNode{
+	return &executionNode{
 		seqId:       seqId,
 		updates:     updates,
 		reads:       proxy.reads(),

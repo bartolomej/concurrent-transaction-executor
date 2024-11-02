@@ -130,6 +130,7 @@ func (dag *dependencyDag) update(newNode *executionNode) bool {
 
 	dag.nodes[newNode.seqId] = newNode
 
+	// TODO: Lazily (e.g. before write) or incrementally (without rebuilding the whole graph) compute edges
 	dag.computeEdges()
 
 	return true
@@ -171,13 +172,18 @@ func (dag *dependencyDag) execute(state *executionAccountState, nWorkers int) {
 			for visited := range queue {
 				node := dag.lookup(visited.seqId)
 
+				// TODO: Add test case
+				// commit updates immediately as no other node can ever impact the result of the execution
+				if len(node.reads) == 0 {
+					state.WriteUpdates(node.updates)
+					visited.done()
+					continue
+				}
+
 				reExecutedNode := executeTransaction(state, node.seqId, *node.transaction)
 
-				// TODO: If node had no dependencies ever, we can immediately write the updates to state,
-				// 	since no other node can ever impact the result of the execution.
-
 				// TODO: Should we handle read and updates changes separately?
-				isDagUpdated := dag.update(&reExecutedNode)
+				isDagUpdated := dag.update(reExecutedNode)
 
 				if !isDagUpdated {
 					state.WriteUpdates(reExecutedNode.updates)
