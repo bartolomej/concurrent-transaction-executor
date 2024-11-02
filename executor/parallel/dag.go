@@ -178,9 +178,9 @@ func (q *channelProcessingQueue) close() {
 }
 
 type processingTask struct {
-	nodeSeqId         int
-	done              func()
-	markNodeUnvisited func(seqId int)
+	nodeSeqId     int
+	done          func()
+	markUnvisited func(seqId int)
 }
 
 func (dag *dependencyDag) execute(state *executionAccountState, nWorkers int) {
@@ -196,16 +196,17 @@ func (dag *dependencyDag) execute(state *executionAccountState, nWorkers int) {
 				diff := dag.update(reExecutedNode)
 
 				for _, seqId := range diff.newDependants {
-					// TODO: Do the same for all descendant nodes of the dependant
 					newDependant := dag.lookup(seqId)
 					state.RevertUpdates(newDependant.updates)
-					task.markNodeUnvisited(seqId)
+
+					task.markUnvisited(seqId)
+					// TODO: Do we need to mark all visited descendant nodes as unvisited as well?
 				}
 
 				if len(diff.newDependencies) == 0 {
 					state.ApplyUpdates(reExecutedNode.updates)
 				} else {
-					task.markNodeUnvisited(reExecutedNode.seqId)
+					task.markUnvisited(reExecutedNode.seqId)
 				}
 
 				task.done()
@@ -250,7 +251,7 @@ func (dag *dependencyDag) concurrentWalk(queue processingQueue) {
 			done: func() {
 				wg.Done()
 			},
-			markNodeUnvisited: func(seqId int) {
+			markUnvisited: func(seqId int) {
 				// TODO(verify): Is this true?
 				// Can be called concurrently for different nodeSeqId values
 				visited[seqId] = false

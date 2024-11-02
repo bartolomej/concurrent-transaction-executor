@@ -49,6 +49,12 @@ func (s *executionAccountState) RevertUpdates(updates []api.AccountUpdate) {
 			BalanceChange: -update.BalanceChange,
 		}
 		s.write(inverseUpdate)
+
+		// Delete the entry from update state if it was reverted to default value,
+		// so that we don't return extra entries from UpdatedValues func.
+		if s.updatedState[update.Name].Balance == 0 {
+			delete(s.updatedState, update.Name)
+		}
 	}
 }
 

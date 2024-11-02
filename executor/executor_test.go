@@ -62,7 +62,8 @@ func TestExecutorTransferTransaction3(t *testing.T) {
 		api.AccountValue{Name: "B", Balance: 0},
 		api.AccountValue{Name: "C", Balance: 0},
 		api.AccountValue{Name: "D", Balance: 0},
-		api.AccountValue{Name: "E", Balance: 0},
+		api.AccountValue{Name: "E", Balance: 10},
+		api.AccountValue{Name: "F", Balance: 0},
 	}
 	block := api.Block{
 		Transactions: []api.Transaction{
@@ -70,8 +71,15 @@ func TestExecutorTransferTransaction3(t *testing.T) {
 			transactions.Transfer{From: "A", To: "C", Value: 10},
 			// At initial execution, this will produce no updates due to "insufficient balance" error
 			transactions.Transfer{From: "B", To: "D", Value: 10},
-			// After initial execution, this will be mistakenly executed before the above tx
+			// After initial execution, this will be incorrectly executed before the above tx
 			transactions.Transfer{From: "D", To: "E", Value: 10},
+			// After initial execution, this will be incorrectly executed (will perform a transfer, when it shouldn't),
+			conditionalBulkTransfer{
+				from:               []string{"E"},
+				to:                 []string{"F"},
+				value:              10,
+				untilBalanceEquals: 10,
+			},
 		},
 	}
 	expectedUpdateState := []api.AccountValue{
@@ -79,7 +87,7 @@ func TestExecutorTransferTransaction3(t *testing.T) {
 		{Name: "B", Balance: 0},
 		{Name: "C", Balance: 10},
 		{Name: "D", Balance: 0},
-		{Name: "E", Balance: 10},
+		{Name: "E", Balance: 20},
 	}
 	assertExecution(t, expectedUpdateState, block, startState, serial.NewExecutor(), "serial")
 	assertExecution(t, expectedUpdateState, block, startState, parallel.NewExecutor(3), "parallel")
