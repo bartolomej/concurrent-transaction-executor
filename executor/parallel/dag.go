@@ -191,21 +191,33 @@ func (dag *dependencyDag) execute(state *executionAccountState, nWorkers int) {
 			for task := range queue {
 				node := dag.lookup(task.nodeSeqId)
 
+				// TODO(perf): Can we sometimes not execute the node again (e.g. when there are no dependencies)?
 				reExecutedNode := executeTransaction(state, node.seqId, *node.transaction)
 
 				diff := dag.update(reExecutedNode)
 
-				for _, seqId := range diff.newDependants {
-					newDependant := dag.lookup(seqId)
-					state.RevertUpdates(newDependant.updates)
+				// The new updates may affect new nodes in the DAG,
+				// so we must revert the state update and reprocess at a later point to compute the correct state updates.
+				// Invalidate entire descendants subgraph,
+				// because all the succeeding state updates may be invalid as well.
+				dq := make([]int, 0)
+				dq = append(dq, diff.newDependants...)
+				for len(dq) > 0 {
+					descendantSeqId := dq[0]
+					dq = dq[1:]
 
-					task.markUnvisited(seqId)
-					// TODO: Do we need to mark all visited descendant nodes as unvisited as well?
+					descendantNode := dag.lookup(descendantSeqId)
+					state.RevertUpdates(descendantNode.updates)
+					task.markUnvisited(descendantSeqId)
+
+					dq = append(dq, dag.dependants(descendantSeqId)...)
 				}
 
 				if len(diff.newDependencies) == 0 {
 					state.ApplyUpdates(reExecutedNode.updates)
 				} else {
+					// This node was moved to a different part of the DAG
+					// and should be processed again at a later point.
 					task.markUnvisited(reExecutedNode.seqId)
 				}
 
@@ -218,6 +230,7 @@ func (dag *dependencyDag) execute(state *executionAccountState, nWorkers int) {
 }
 
 // TODO(cleanup): Refactor this into a DagWalker struct
+// TODO(perf): If channel queue scheduling is a bottleneck, pushing a batch of tasks to chan processingTask[] instead
 func (dag *dependencyDag) concurrentWalk(queue processingQueue) {
 	// nodes in the queue were already processed
 	// and are waiting to be traversed to process their dependants
@@ -252,7 +265,6 @@ func (dag *dependencyDag) concurrentWalk(queue processingQueue) {
 				wg.Done()
 			},
 			markUnvisited: func(seqId int) {
-				// TODO(verify): Is this true?
 				// Can be called concurrently for different nodeSeqId values
 				visited[seqId] = false
 			},

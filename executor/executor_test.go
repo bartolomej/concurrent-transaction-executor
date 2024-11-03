@@ -64,6 +64,7 @@ func TestExecutorTransferTransaction3(t *testing.T) {
 		api.AccountValue{Name: "D", Balance: 0},
 		api.AccountValue{Name: "E", Balance: 10},
 		api.AccountValue{Name: "F", Balance: 0},
+		api.AccountValue{Name: "G", Balance: 0},
 	}
 	block := api.Block{
 		Transactions: []api.Transaction{
@@ -80,6 +81,7 @@ func TestExecutorTransferTransaction3(t *testing.T) {
 				value:              10,
 				untilBalanceEquals: 10,
 			},
+			transactions.Transfer{From: "F", To: "G", Value: 10},
 		},
 	}
 	expectedUpdateState := []api.AccountValue{
