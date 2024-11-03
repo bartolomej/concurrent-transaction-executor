@@ -87,7 +87,7 @@ func (s *stateProxy) GetAccount(name string) api.AccountValue {
 
 func (s *stateProxy) reads() []string {
 	reads := make([]string, 0, len(s.readsLookup))
-	for read, _ := range s.readsLookup {
+	for read := range s.readsLookup {
 		reads = append(reads, read)
 	}
 	// Sort so that comparisons with slices.Equal work

@@ -175,8 +175,7 @@ func TestParallelExecutionWithIndependentBranches(t *testing.T) {
 
 	startState := make(testAccountState, 0)
 
-	// TODO: build a tree-like dependency structure
-	// TODO: Add a test case with random dependency structure
+	// TODO: build a tree-like dependency structure to benchmark it to sequential processing
 	var block api.Block
 	for i := 0; i < branches; i++ {
 		from := fmt.Sprintf("A_%d", i)

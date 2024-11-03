@@ -251,6 +251,11 @@ func (q *testDagQueue) process(units []processingTask) {
 	q.batches = append(q.batches, idBatch)
 }
 
+func (q *testDagQueue) tasks() <-chan processingTask {
+	// Not needed for testing
+	panic("unimplemented")
+}
+
 func (q *testDagQueue) close() {
 	// noop
 }

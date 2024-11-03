@@ -46,25 +46,23 @@ func (dag *dependencyDag) computeEdges() {
 	for _, node := range dag.nodes {
 		orderedNodes = append(orderedNodes, node)
 	}
-	slices.SortFunc(orderedNodes, func(a, b *executionNode) int {
-		return a.seqId - b.seqId
-	})
+	sortNodesBySeqId(orderedNodes)
 
 	for _, node := range orderedNodes {
 		dependencies := make(map[int]bool)
 		for _, read := range node.reads {
-			for seqId, _ := range seqIdsByUpdate[read] {
+			for seqId := range seqIdsByUpdate[read] {
 				dependencies[seqId] = true
 			}
 		}
 		for _, update := range node.updates {
-			for seqId, _ := range seqIdsByRead[update.Name] {
+			for seqId := range seqIdsByRead[update.Name] {
 				dependencies[seqId] = true
 			}
 		}
 		dag.dependenciesById[node.seqId] = dependencies
 
-		for depSeqId, _ := range dependencies {
+		for depSeqId := range dependencies {
 			_, ok := dag.dependantsById[depSeqId]
 			if !ok {
 				dag.dependantsById[depSeqId] = make(map[int]bool)
@@ -93,17 +91,13 @@ func (dag *dependencyDag) computeEdges() {
 }
 
 func (dag *dependencyDag) lookup(id int) *executionNode {
-	// TODO: Move locking responsibility to the caller?
-	dag.mu.RLock()
-	defer dag.mu.RUnlock()
-
 	return dag.nodes[id]
 }
 
 func (dag *dependencyDag) dependants(seqId int) []int {
 	var seqIds []int
 
-	for id, _ := range dag.dependantsById[seqId] {
+	for id := range dag.dependantsById[seqId] {
 		seqIds = append(seqIds, id)
 	}
 
@@ -113,7 +107,7 @@ func (dag *dependencyDag) dependants(seqId int) []int {
 func (dag *dependencyDag) dependencies(seqId int) []int {
 	var seqIds []int
 
-	for id, _ := range dag.dependenciesById[seqId] {
+	for id := range dag.dependenciesById[seqId] {
 		seqIds = append(seqIds, id)
 	}
 
@@ -134,7 +128,7 @@ func (dag *dependencyDag) update(newNode *executionNode) updateDiff {
 	oldNode := dag.nodes[newNode.seqId]
 
 	if oldNode == nil {
-		panic("cannot call update for new nodes")
+		panic(fmt.Sprintf("cannot call update for new node with seqId %d", newNode.seqId))
 	}
 
 	dag.nodes[newNode.seqId] = newNode
@@ -157,6 +151,7 @@ func (dag *dependencyDag) update(newNode *executionNode) updateDiff {
 type processingQueue interface {
 	process([]processingTask)
 	close()
+	tasks() <-chan processingTask
 }
 
 type channelProcessingQueue struct {
@@ -171,6 +166,10 @@ func (q *channelProcessingQueue) process(units []processingTask) {
 	for _, unit := range units {
 		q.queue <- unit
 	}
+}
+
+func (q *channelProcessingQueue) tasks() <-chan processingTask {
+	return q.queue
 }
 
 func (q *channelProcessingQueue) close() {
@@ -223,13 +222,12 @@ func (dag *dependencyDag) execute(state *executionAccountState, nWorkers int) {
 
 				task.done()
 			}
-		}(i, queue.queue)
+		}(i, queue.tasks())
 	}
 
 	dag.concurrentWalk(queue)
 }
 
-// TODO(cleanup): Refactor this into a DagWalker struct
 // TODO(perf): If channel queue scheduling is a bottleneck, pushing a batch of tasks to chan processingTask[] instead
 func (dag *dependencyDag) concurrentWalk(queue processingQueue) {
 	// nodes in the queue were already processed
@@ -279,7 +277,7 @@ func (dag *dependencyDag) concurrentWalk(queue processingQueue) {
 		}
 	}
 
-	for seqId, _ := range dag.nodes {
+	for seqId := range dag.nodes {
 		if len(dag.dependencies(seqId)) == 0 {
 			schedule(seqId)
 		}
@@ -323,9 +321,7 @@ func (dag *dependencyDag) String() string {
 	for _, node := range dag.nodes {
 		sortedNodes = append(sortedNodes, node)
 	}
-	slices.SortFunc(sortedNodes, func(a, b *executionNode) int {
-		return a.seqId - b.seqId
-	})
+	sortNodesBySeqId(sortedNodes)
 
 	sb.WriteString("nodes:\n")
 	for _, node := range sortedNodes {
@@ -384,15 +380,26 @@ func (node *executionNode) String() string {
 
 // subtract returns integers that are in first but not second array
 func subtract(first, second []int) []int {
+	m := make(map[int]bool, len(second))
+	for _, b := range second {
+		m[b] = true
+	}
 	var sub []int
-outer:
 	for _, a := range first {
-		for _, b := range second {
-			if a == b {
-				continue outer
-			}
+		if _, found := m[a]; !found {
+			sub = append(sub, a)
 		}
-		sub = append(sub, a)
 	}
 	return sub
+}
+
+func sortNodesBySeqId(nodes []*executionNode) {
+	slices.SortFunc(nodes, func(a, b *executionNode) int {
+		if a.seqId < b.seqId {
+			return -1
+		} else if a.seqId > b.seqId {
+			return 1
+		}
+		return 0
+	})
 }
