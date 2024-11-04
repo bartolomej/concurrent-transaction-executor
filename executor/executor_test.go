@@ -6,7 +6,9 @@ import (
 	"blockchain/executor/serial"
 	"blockchain/transactions"
 	"fmt"
+	"math"
 	"sort"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -168,43 +170,60 @@ func TestExecutorConditionalTransaction5(t *testing.T) {
 	assertExecution(t, expectedUpdateState, block, startState, parallel.NewExecutor(3), "parallel")
 }
 
-// TODO(perf): Increasing branches/txPerBranch scales horribly for parallel execution
+// TODO: Concurrent execution doesn't scale well for increasing values of maxDepth
+// TODO: Fix concurrent issues for increasing values of maxDepth
 func TestParallelExecutionWithIndependentBranches(t *testing.T) {
-	branches := 10
-	txPerBranch := 100
+	rootAccount := "A"
+	leafAccount := "B"
+	maxDepth := 2
+	rootBalance := uint(math.Pow(2, float64(maxDepth)))
 
-	startState := make(testAccountState, 0)
-
-	// TODO: build a tree-like dependency structure to benchmark it to sequential processing
-	var block api.Block
-	for i := 0; i < branches; i++ {
-		from := fmt.Sprintf("A_%d", i)
-		to := fmt.Sprintf("B_%d", i)
-		startState = append(startState, api.AccountValue{Name: from, Balance: uint(txPerBranch)})
-		startState = append(startState, api.AccountValue{Name: to, Balance: 0})
-
-		for j := 0; j < txPerBranch; j++ {
-			block.Transactions = append(block.Transactions, transactions.Transfer{
-				From:  from,
-				To:    to,
-				Value: 1,
-			})
-		}
+	startState := testAccountState{
+		api.AccountValue{Name: rootAccount, Balance: rootBalance},
 	}
 
-	var expectedUpdateState []api.AccountValue
-	for i := 0; i < branches; i++ {
-		from := fmt.Sprintf("A_%d", i)
-		to := fmt.Sprintf("B_%d", i)
+	var block = api.Block{
+		Transactions: buildBinaryTxTree(0, rootAccount, rootBalance, leafAccount),
+	}
 
-		expectedUpdateState = append(expectedUpdateState, api.AccountValue{Name: from, Balance: 0})
-		expectedUpdateState = append(expectedUpdateState, api.AccountValue{Name: to, Balance: uint(txPerBranch)})
+	var expectedUpdateState = []api.AccountValue{
+		{Name: rootAccount, Balance: 0},
+		{Name: leafAccount, Balance: rootBalance},
 	}
 
 	// Note: A noticeable perf improvement for parallel execution is only visible
 	// when transactions are doing more intensive work (e.g. loops with 1000+ iterations or I/O)
 	assertExecution(t, expectedUpdateState, block, startState, serial.NewExecutor(), "serial")
 	assertExecution(t, expectedUpdateState, block, startState, parallel.NewExecutor(10), "parallel")
+}
+
+// buildBinaryTxTree builds a binary tree that redistributes the values from root account to the end account
+// where the transaction dependency graph is in the shape of a binary tree with height low2(rootBalance)
+func buildBinaryTxTree(id int, from string, amount uint, endAccount string) []api.Transaction {
+	var txs []api.Transaction
+	var to = from + strconv.FormatInt(int64(id), 10)
+	// Stop condition - subdivide the amount anymore
+	var isLeaf = amount == 1
+
+	if isLeaf {
+		// Transfer to the same account at the end, so that it's easier to test
+		to = endAccount
+	}
+
+	txs = append(txs, transactions.Transfer{
+		From:  from,
+		To:    to,
+		Value: amount,
+	})
+
+	if isLeaf {
+		return txs
+	}
+
+	txs = append(txs, buildBinaryTxTree(id+1, to, amount/2, endAccount)...)
+	txs = append(txs, buildBinaryTxTree(id+2, to, amount/2, endAccount)...)
+
+	return txs
 }
 
 type longRunningTx struct {
@@ -263,21 +282,21 @@ func (s testAccountState) GetAccount(name string) api.AccountValue {
 
 func assertExecution(
 	t *testing.T,
-	expectedStateUpdate []api.AccountValue,
+	expectedUpdatedState []api.AccountValue,
 	block api.Block,
 	startState api.AccountState,
 	executor api.BlockExecutor,
 	label string,
 ) {
 	start := time.Now()
-	actualStateUpdate, err := executor.ExecuteBlock(block, startState)
+	actualUpdatedState, err := executor.ExecuteBlock(block, startState)
 	elapsed := time.Since(start)
 
-	sort.Slice(actualStateUpdate, func(i, j int) bool {
-		return actualStateUpdate[i].Name < actualStateUpdate[j].Name
+	sort.Slice(actualUpdatedState, func(i, j int) bool {
+		return actualUpdatedState[i].Name < actualUpdatedState[j].Name
 	})
-	sort.Slice(expectedStateUpdate, func(i, j int) bool {
-		return expectedStateUpdate[i].Name < expectedStateUpdate[j].Name
+	sort.Slice(expectedUpdatedState, func(i, j int) bool {
+		return expectedUpdatedState[i].Name < expectedUpdatedState[j].Name
 	})
 
 	fmt.Printf("Execution for %s took %s\n", label, elapsed)
@@ -286,12 +305,12 @@ func assertExecution(
 		t.Errorf("unexpected error while executing block: %e", err)
 	}
 
-	if len(expectedStateUpdate) != len(actualStateUpdate) {
-		t.Fatalf("expected %d updates, but got %d", len(expectedStateUpdate), len(actualStateUpdate))
+	if len(expectedUpdatedState) != len(actualUpdatedState) {
+		t.Fatalf("expected %d updates, but got %d", len(expectedUpdatedState), len(actualUpdatedState))
 	}
 
-	for i, expected := range expectedStateUpdate {
-		actual := actualStateUpdate[i]
+	for i, expected := range expectedUpdatedState {
+		actual := actualUpdatedState[i]
 		if expected.Name != actual.Name {
 			t.Errorf("name assertion failed -> expected: %s, actual: %s", expected.Name, actual.Name)
 		}

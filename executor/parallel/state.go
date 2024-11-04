@@ -72,8 +72,10 @@ func (s *executionAccountState) write(update api.AccountUpdate) {
 
 func (s *executionAccountState) UpdatedValues() []api.AccountValue {
 	var updatedValues []api.AccountValue
-	for _, v := range s.updatedState {
-		updatedValues = append(updatedValues, *v)
+	for name, accountValue := range s.updatedState {
+		if s.oldState.GetAccount(name).Balance != accountValue.Balance {
+			updatedValues = append(updatedValues, *accountValue)
+		}
 	}
 
 	return updatedValues

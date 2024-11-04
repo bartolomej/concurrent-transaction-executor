@@ -61,10 +61,12 @@ func (s *executorState) ApplyUpdates(updates []api.AccountUpdate) {
 func (s *executorState) UpdatedAccountValues() []api.AccountValue {
 	var updatedValues []api.AccountValue
 	for k, v := range s.uncommitedBalancesByName {
-		updatedValues = append(updatedValues, api.AccountValue{
-			Name:    k,
-			Balance: v,
-		})
+		if s.startState.GetAccount(k).Balance != v {
+			updatedValues = append(updatedValues, api.AccountValue{
+				Name:    k,
+				Balance: v,
+			})
+		}
 	}
 
 	return updatedValues
