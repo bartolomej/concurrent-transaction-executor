@@ -90,12 +90,13 @@ func (e *dagExecutor) schedule(seqId int) {
 		done: func() {
 			e.wg.Done()
 		},
-		markUnvisited: func(seqId int) {
-			// Can be called concurrently for different nodeSeqId values
-			e.visited[seqId] = false
-		},
 	})
 	e.q = append(e.q, seqId)
+}
+
+// Can be called concurrently for different seqId values
+func (e *dagExecutor) markUnvisited(seqId int) {
+	e.visited[seqId] = false
 }
 
 func (e *dagExecutor) awaitProcessing() {
@@ -104,4 +105,37 @@ func (e *dagExecutor) awaitProcessing() {
 		e.currBatch = make([]processingTask, 0)
 		e.wg.Wait()
 	}
+}
+
+type processingQueue interface {
+	process([]processingTask)
+	close()
+	tasks() <-chan processingTask
+}
+
+type channelProcessingQueue struct {
+	queue chan processingTask
+}
+
+func newChannelProcessingQueue() *channelProcessingQueue {
+	return &channelProcessingQueue{queue: make(chan processingTask)}
+}
+
+func (q *channelProcessingQueue) process(units []processingTask) {
+	for _, unit := range units {
+		q.queue <- unit
+	}
+}
+
+func (q *channelProcessingQueue) tasks() <-chan processingTask {
+	return q.queue
+}
+
+func (q *channelProcessingQueue) close() {
+	close(q.queue)
+}
+
+type processingTask struct {
+	nodeSeqId int
+	done      func()
 }

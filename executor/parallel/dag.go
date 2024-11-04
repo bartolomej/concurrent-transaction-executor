@@ -148,42 +148,9 @@ func (dag *dependencyDag) update(newNode *executionNode) updateDiff {
 	}
 }
 
-type processingQueue interface {
-	process([]processingTask)
-	close()
-	tasks() <-chan processingTask
-}
-
-type channelProcessingQueue struct {
-	queue chan processingTask
-}
-
-func newChannelProcessingQueue() *channelProcessingQueue {
-	return &channelProcessingQueue{queue: make(chan processingTask)}
-}
-
-func (q *channelProcessingQueue) process(units []processingTask) {
-	for _, unit := range units {
-		q.queue <- unit
-	}
-}
-
-func (q *channelProcessingQueue) tasks() <-chan processingTask {
-	return q.queue
-}
-
-func (q *channelProcessingQueue) close() {
-	close(q.queue)
-}
-
-type processingTask struct {
-	nodeSeqId     int
-	done          func()
-	markUnvisited func(seqId int)
-}
-
 func (dag *dependencyDag) execute(state *executionAccountState, nWorkers int) {
 	queue := newChannelProcessingQueue()
+	executor := newDagExecutor(dag, queue)
 
 	for i := 0; i < nWorkers; i++ {
 		go func(workerId int, queue <-chan processingTask) {
@@ -207,8 +174,9 @@ func (dag *dependencyDag) execute(state *executionAccountState, nWorkers int) {
 
 					descendantNode := dag.lookup(descendantSeqId)
 					state.RevertUpdates(descendantNode.updates)
-					task.markUnvisited(descendantSeqId)
+					executor.markUnvisited(descendantSeqId)
 
+					// TODO(perf): Only push the ones that weren't visited yet
 					dq = append(dq, dag.dependants(descendantSeqId)...)
 				}
 
@@ -217,7 +185,7 @@ func (dag *dependencyDag) execute(state *executionAccountState, nWorkers int) {
 				} else {
 					// This node was moved to a different part of the DAG
 					// and should be processed again at a later point.
-					task.markUnvisited(reExecutedNode.seqId)
+					executor.markUnvisited(reExecutedNode.seqId)
 				}
 
 				task.done()
@@ -225,7 +193,6 @@ func (dag *dependencyDag) execute(state *executionAccountState, nWorkers int) {
 		}(i, queue.tasks())
 	}
 
-	executor := newDagExecutor(dag, queue)
 	executor.execute()
 }
 
