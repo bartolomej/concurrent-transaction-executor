@@ -175,7 +175,7 @@ func TestExecutorConditionalTransaction5(t *testing.T) {
 func TestParallelExecutionWithIndependentBranches(t *testing.T) {
 	rootAccount := "A"
 	leafAccount := "B"
-	maxDepth := 2
+	maxDepth := 5
 	rootBalance := uint(math.Pow(2, float64(maxDepth)))
 
 	startState := testAccountState{

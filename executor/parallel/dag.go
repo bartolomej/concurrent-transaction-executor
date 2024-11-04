@@ -11,7 +11,7 @@ import (
 
 // dependencyDag is a Directed Acyclic Graph that is not necessarily connected.
 type dependencyDag struct {
-	nodes map[int]*executionNode
+	nodes []*executionNode
 	// dependantsById tracks a list of dependant nodes (reverse dependencies) for every node ID
 	dependantsById map[int]map[int]bool
 	// dependenciesById tracks a list of dependency nodes for every node ID
@@ -23,7 +23,7 @@ type dependencyDag struct {
 // buildDependencyDag computes a dependency DAG given nodes
 func newDependencyDag(nodes []*executionNode) *dependencyDag {
 	dag := &dependencyDag{
-		nodes:            make(map[int]*executionNode),
+		nodes:            make([]*executionNode, len(nodes)),
 		dependantsById:   make(map[int]map[int]bool),
 		dependenciesById: make(map[int]map[int]bool),
 	}
