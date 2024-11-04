@@ -35,7 +35,7 @@ func TestDag1(t *testing.T) {
 	actual := newDependencyDag(nodes)
 
 	expected := &dependencyDag{
-		nodes: map[int]*executionNode{
+		nodes: []*executionNode{
 			0: nodes[0],
 			1: nodes[1],
 			2: nodes[2],
@@ -92,7 +92,7 @@ func TestDag2(t *testing.T) {
 	actual := newDependencyDag(nodes)
 
 	expected := &dependencyDag{
-		nodes: map[int]*executionNode{
+		nodes: []*executionNode{
 			0: nodes[0],
 			1: nodes[1],
 			2: nodes[2],

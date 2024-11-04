@@ -18,11 +18,11 @@ func (e *Executor) ExecuteBlock(block api.Block, state api.AccountState) ([]api.
 	nodes := e.executeOptimistically(block.Transactions, state)
 
 	dag := newDependencyDag(nodes)
-	execState := newExecutionAccountState(state)
+	delta := newAccountDelta(state)
 
-	dag.execute(execState, e.NWorkers)
+	dag.execute(delta, e.NWorkers)
 
-	return execState.UpdatedValues(), nil
+	return delta.UpdatedValues(), nil
 }
 
 func (e *Executor) executeOptimistically(transactions []api.Transaction, state api.AccountState) []*executionNode {

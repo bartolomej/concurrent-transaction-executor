@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"strconv"
 	"testing"
 	"time"
 )
@@ -88,9 +87,7 @@ func TestExecutorTransferTransaction3(t *testing.T) {
 	}
 	expectedUpdateState := []api.AccountValue{
 		{Name: "A", Balance: 0},
-		{Name: "B", Balance: 0},
 		{Name: "C", Balance: 10},
-		{Name: "D", Balance: 0},
 		{Name: "E", Balance: 20},
 	}
 	assertExecution(t, expectedUpdateState, block, startState, serial.NewExecutor(), "serial")
@@ -144,9 +141,7 @@ func TestExecutorConditionalTransaction4(t *testing.T) {
 }
 
 func TestExecutorConditionalTransaction5(t *testing.T) {
-	startState := testAccountState{
-		api.AccountValue{Name: "A", Balance: 0},
-	}
+	startState := testAccountState{}
 	block := api.Block{
 		Transactions: []api.Transaction{
 			transactions.Mint{To: "A", Value: 10},
@@ -162,7 +157,6 @@ func TestExecutorConditionalTransaction5(t *testing.T) {
 		},
 	}
 	expectedUpdateState := []api.AccountValue{
-		{Name: "A", Balance: 0},
 		{Name: "B", Balance: 10},
 	}
 
@@ -171,7 +165,6 @@ func TestExecutorConditionalTransaction5(t *testing.T) {
 }
 
 // TODO: Concurrent execution doesn't scale well for increasing values of maxDepth
-// TODO: Fix concurrent issues for increasing values of maxDepth
 func TestParallelExecutionWithIndependentBranches(t *testing.T) {
 	rootAccount := "A"
 	leafAccount := "B"
@@ -182,8 +175,13 @@ func TestParallelExecutionWithIndependentBranches(t *testing.T) {
 		api.AccountValue{Name: rootAccount, Balance: rootBalance},
 	}
 
-	var block = api.Block{
-		Transactions: buildBinaryTxTree(0, rootAccount, rootBalance, leafAccount),
+	var id = 0
+	var block = api.Block{}
+
+	txs := buildTransferTree(&id, rootAccount, rootBalance, leafAccount)
+
+	for _, tx := range txs {
+		block.Transactions = append(block.Transactions, tx)
 	}
 
 	var expectedUpdateState = []api.AccountValue{
@@ -191,17 +189,18 @@ func TestParallelExecutionWithIndependentBranches(t *testing.T) {
 		{Name: leafAccount, Balance: rootBalance},
 	}
 
+	// TODO: Fix some nodes not executed
 	// Note: A noticeable perf improvement for parallel execution is only visible
 	// when transactions are doing more intensive work (e.g. loops with 1000+ iterations or I/O)
 	assertExecution(t, expectedUpdateState, block, startState, serial.NewExecutor(), "serial")
 	assertExecution(t, expectedUpdateState, block, startState, parallel.NewExecutor(10), "parallel")
 }
 
-// buildBinaryTxTree builds a binary tree that redistributes the values from root account to the end account
+// buildTransferTree builds a binary tree that redistributes the values from root account to the end account
 // where the transaction dependency graph is in the shape of a binary tree with height low2(rootBalance)
-func buildBinaryTxTree(id int, from string, amount uint, endAccount string) []api.Transaction {
-	var txs []api.Transaction
-	var to = from + strconv.FormatInt(int64(id), 10)
+func buildTransferTree(id *int, from string, amount uint, endAccount string) []transactions.Transfer {
+	var txs []transactions.Transfer
+	var to = fmt.Sprintf("%s_%d", from, *id)
 	// Stop condition - subdivide the amount anymore
 	var isLeaf = amount == 1
 
@@ -220,8 +219,10 @@ func buildBinaryTxTree(id int, from string, amount uint, endAccount string) []ap
 		return txs
 	}
 
-	txs = append(txs, buildBinaryTxTree(id+1, to, amount/2, endAccount)...)
-	txs = append(txs, buildBinaryTxTree(id+2, to, amount/2, endAccount)...)
+	*id++
+	txs = append(txs, buildTransferTree(id, to, amount/2, endAccount)...)
+	*id++
+	txs = append(txs, buildTransferTree(id, to, amount/2, endAccount)...)
 
 	return txs
 }

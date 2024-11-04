@@ -16,8 +16,6 @@ type dependencyDag struct {
 	dependantsById map[int]map[int]bool
 	// dependenciesById tracks a list of dependency nodes for every node ID
 	dependenciesById map[int]map[int]bool
-	// mu protects writes/reads to above maps
-	mu sync.RWMutex
 }
 
 // buildDependencyDag computes a dependency DAG given nodes
@@ -117,9 +115,6 @@ type updateDiff struct {
 // update the DAG (if needed) with the re-executed execution node
 // returns the newly added dependencies/dependants for the new node
 func (dag *dependencyDag) update(newNode *executionNode) updateDiff {
-	dag.mu.Lock()
-	defer dag.mu.Unlock()
-
 	oldNode := dag.nodes[newNode.seqId]
 
 	if oldNode == nil {
@@ -143,13 +138,15 @@ func (dag *dependencyDag) update(newNode *executionNode) updateDiff {
 	}
 }
 
-func (dag *dependencyDag) execute(state *executionAccountState, nWorkers int) {
+func (dag *dependencyDag) execute(state *accountDelta, nWorkers int) {
 	queue := newChannelProcessingQueue()
 	executor := newDagExecutor(dag, queue)
+	var mu sync.Mutex
 
 	for i := 0; i < nWorkers; i++ {
 		go func(workerId int, queue <-chan processingTask) {
 			for task := range queue {
+				mu.Lock()
 				node := dag.lookup(task.nodeSeqId)
 
 				// TODO(perf): Can we sometimes not execute the node again (e.g. if it's the first transaction)?
@@ -185,12 +182,28 @@ func (dag *dependencyDag) execute(state *executionAccountState, nWorkers int) {
 					executor.markUnvisited(reExecutedNode.seqId)
 				}
 
+				mu.Unlock()
 				task.done()
 			}
 		}(i, queue.tasks())
 	}
 
 	executor.execute()
+}
+
+// Graphviz outputs a graph in DOT graphing language.
+// See: https://graphviz.org/doc/info/lang.html
+// View online: https://dreampuf.github.io/GraphvizOnline
+func (dag *dependencyDag) Graphviz() string {
+	var sb strings.Builder
+	sb.WriteString("digraph TxDeps {\n")
+	for _, node := range dag.nodes {
+		for _, depSeqId := range dag.dependants(node.seqId) {
+			sb.WriteString(fmt.Sprintf("\t%d -> %d;\n", node.seqId, depSeqId))
+		}
+	}
+	sb.WriteString("}")
+	return sb.String()
 }
 
 func (dag *dependencyDag) String() string {
