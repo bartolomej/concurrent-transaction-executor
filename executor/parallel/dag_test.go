@@ -123,7 +123,8 @@ func TestDag2(t *testing.T) {
 	assertDagEqual(t, actual, expected)
 
 	testQueue := newTestDagQueue()
-	actual.concurrentWalk(testQueue)
+	executor := newDagExecutor(actual, testQueue)
+	executor.execute()
 
 	expectedWalkOrder := [][]int{
 		{0},
@@ -168,7 +169,8 @@ func TestConcurrentWalk1(t *testing.T) {
 	})
 
 	testQueue := newTestDagQueue()
-	dag.concurrentWalk(testQueue)
+	executor := newDagExecutor(dag, testQueue)
+	executor.execute()
 
 	expected := [][]int{
 		{0, 1},
@@ -221,7 +223,8 @@ func TestConcurrentWalk2(t *testing.T) {
 	})
 
 	testQueue := newTestDagQueue()
-	dag.concurrentWalk(testQueue)
+	executor := newDagExecutor(dag, testQueue)
+	executor.execute()
 
 	expected := [][]int{
 		{0, 1},
