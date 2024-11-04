@@ -157,7 +157,9 @@ func (dag *dependencyDag) execute(state *executionAccountState, nWorkers int) {
 			for task := range queue {
 				node := dag.lookup(task.nodeSeqId)
 
-				// TODO(perf): Can we sometimes not execute the node again (e.g. when there are no dependencies)?
+				// TODO(perf): Can we sometimes not execute the node again (e.g. if it's the first transaction)?
+				// We don't know if a transaction was executed in the correct order,
+				// so we must always re-execute it to see if anything changed, until we traverse the graph fully.
 				reExecutedNode := executeTransaction(state, node.seqId, *node.transaction)
 
 				diff := dag.update(reExecutedNode)
