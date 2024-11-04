@@ -20,8 +20,7 @@ type dependencyDag struct {
 	mu sync.RWMutex
 }
 
-// buildDependencyDag produces a dependency DAG (Directed Acyclic Graph)
-// given an ordered (by nodeSeqId) list of execution reports
+// buildDependencyDag computes a dependency DAG given nodes
 func newDependencyDag(nodes []*executionNode) *dependencyDag {
 	dag := &dependencyDag{
 		nodes:            make(map[int]*executionNode),
@@ -96,21 +95,17 @@ func (dag *dependencyDag) lookup(id int) *executionNode {
 
 func (dag *dependencyDag) dependants(seqId int) []int {
 	var seqIds []int
-
 	for id := range dag.dependantsById[seqId] {
 		seqIds = append(seqIds, id)
 	}
-
 	return seqIds
 }
 
 func (dag *dependencyDag) dependencies(seqId int) []int {
 	var seqIds []int
-
 	for id := range dag.dependenciesById[seqId] {
 		seqIds = append(seqIds, id)
 	}
-
 	return seqIds
 }
 
@@ -136,7 +131,7 @@ func (dag *dependencyDag) update(newNode *executionNode) updateDiff {
 	beforeDependants := dag.dependants(newNode.seqId)
 	beforeDependencies := dag.dependencies(newNode.seqId)
 
-	// TODO(perf): Incrementally (without rebuilding the whole graph) compute edges
+	// TODO(perf): Incrementally (without rebuilding the whole graph) compute edges?
 	dag.computeEdges()
 
 	afterDependants := dag.dependants(newNode.seqId)
@@ -259,6 +254,29 @@ func (node *executionNode) String() string {
 		"("+strings.Join(updateEntries, ",")+")",
 		node.err,
 	)
+}
+
+// channelProcessingQueue is the default implementation of processingQueue using channels
+type channelProcessingQueue struct {
+	queue chan processingTask
+}
+
+func newChannelProcessingQueue() *channelProcessingQueue {
+	return &channelProcessingQueue{queue: make(chan processingTask)}
+}
+
+func (q *channelProcessingQueue) enqueue(units []processingTask) {
+	for _, unit := range units {
+		q.queue <- unit
+	}
+}
+
+func (q *channelProcessingQueue) tasks() <-chan processingTask {
+	return q.queue
+}
+
+func (q *channelProcessingQueue) close() {
+	close(q.queue)
 }
 
 // subtract returns integers that are in first but not second array

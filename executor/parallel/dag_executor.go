@@ -5,7 +5,7 @@ import "sync"
 // dagExecutor handles topologically traversing the DAG and scheduling concurrent processing for independent set of nodes
 type dagExecutor struct {
 	// nodes in q were already processed
-	// and are waiting to be traversed to process their dependants
+	// and are waiting to be traversed to enqueue their dependants
 	q               []int
 	wg              sync.WaitGroup
 	currBatch       []processingTask
@@ -101,38 +101,18 @@ func (e *dagExecutor) markUnvisited(seqId int) {
 
 func (e *dagExecutor) awaitProcessing() {
 	if len(e.currBatch) > 0 {
-		e.processingQueue.process(e.currBatch)
+		e.processingQueue.enqueue(e.currBatch)
 		e.currBatch = make([]processingTask, 0)
 		e.wg.Wait()
 	}
 }
 
+// processingQueue abstracts away the queue implementation (done with channels in channelProcessingQueue)
+// so that it's easier to test the batches that are enqueued at different steps.
 type processingQueue interface {
-	process([]processingTask)
+	enqueue([]processingTask)
 	close()
 	tasks() <-chan processingTask
-}
-
-type channelProcessingQueue struct {
-	queue chan processingTask
-}
-
-func newChannelProcessingQueue() *channelProcessingQueue {
-	return &channelProcessingQueue{queue: make(chan processingTask)}
-}
-
-func (q *channelProcessingQueue) process(units []processingTask) {
-	for _, unit := range units {
-		q.queue <- unit
-	}
-}
-
-func (q *channelProcessingQueue) tasks() <-chan processingTask {
-	return q.queue
-}
-
-func (q *channelProcessingQueue) close() {
-	close(q.queue)
 }
 
 type processingTask struct {

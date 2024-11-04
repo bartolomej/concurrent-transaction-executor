@@ -245,7 +245,7 @@ func newTestDagQueue() *testDagQueue {
 	}
 }
 
-func (q *testDagQueue) process(units []processingTask) {
+func (q *testDagQueue) enqueue(units []processingTask) {
 	idBatch := make([]int, 0)
 	for _, unit := range units {
 		idBatch = append(idBatch, unit.nodeSeqId)
