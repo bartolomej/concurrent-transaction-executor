@@ -30,15 +30,16 @@ func (e *Executor) executeOptimistically(transactions []api.Transaction, state a
 	nodeBatches := make([][]*executionNode, e.NWorkers)
 
 	wg := sync.WaitGroup{}
-	for i := 0; i < e.NWorkers; i++ {
-		startSeqId := (nTx / e.NWorkers) * i
-		endSeqId := startSeqId + (nTx / e.NWorkers)
-		if i == e.NWorkers-1 {
+	for workerId := 0; workerId < e.NWorkers; workerId++ {
+		chunk := nTx / e.NWorkers
+		startSeqId := chunk * workerId
+		endSeqId := startSeqId + chunk
+		if workerId == e.NWorkers-1 {
 			endSeqId = nTx
 		}
 
 		wg.Add(1)
-		go func(workerId int, wg *sync.WaitGroup) {
+		go func(workerId, startSeqId, endSeqId int, wg *sync.WaitGroup) {
 			nodeBatch := make([]*executionNode, 0, endSeqId-startSeqId)
 			for seqId := startSeqId; seqId < endSeqId; seqId++ {
 				// TODO(perf): Avg execution time is sometimes still up to 2x larger than for serial processing,
@@ -47,7 +48,7 @@ func (e *Executor) executeOptimistically(transactions []api.Transaction, state a
 			}
 			nodeBatches[workerId] = nodeBatch
 			wg.Done()
-		}(i, &wg)
+		}(workerId, startSeqId, endSeqId, &wg)
 	}
 
 	wg.Wait()
