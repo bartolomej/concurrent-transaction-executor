@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -307,7 +308,13 @@ func assertExecution(
 	}
 
 	if len(expectedUpdatedState) != len(actualUpdatedState) {
-		t.Fatalf("expected %d updates, but got %d", len(expectedUpdatedState), len(actualUpdatedState))
+
+		t.Fatalf(
+			"expected %d updates, but got %d:\n%s",
+			len(expectedUpdatedState),
+			len(actualUpdatedState),
+			formatValues(actualUpdatedState),
+		)
 	}
 
 	for i, expected := range expectedUpdatedState {
@@ -319,4 +326,12 @@ func assertExecution(
 			t.Errorf("balance assertion failed for %s -> expected: %d, actual: %d", expected.Name, expected.Balance, actual.Balance)
 		}
 	}
+}
+
+func formatValues(values []api.AccountValue) string {
+	var serUpdates []string
+	for _, v := range values {
+		serUpdates = append(serUpdates, fmt.Sprintf("[%s, %d]", v.Name, v.Balance))
+	}
+	return strings.Join(serUpdates, ", ")
 }

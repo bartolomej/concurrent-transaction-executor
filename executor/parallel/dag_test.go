@@ -135,6 +135,7 @@ func TestDag2(t *testing.T) {
 	assertQueueEqual(t, testQueue, expectedWalkOrder)
 }
 
+// TODO: Test dag update
 func TestDagUpdate(t *testing.T) {
 	nodes := []*executionNode{}
 
@@ -195,7 +196,7 @@ func TestConcurrentWalk1(t *testing.T) {
 	assertQueueEqual(t, testQueue, expected)
 }
 
-// Verifies that long independent branches are visited concurrently
+// Verifies that long independent branches are processed concurrently
 func TestConcurrentWalk2(t *testing.T) {
 	dag := newDependencyDag([]*executionNode{
 		{

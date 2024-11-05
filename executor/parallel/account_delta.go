@@ -2,17 +2,21 @@ package parallel
 
 import (
 	"blockchain/executor/api"
+	"fmt"
+	"strings"
 )
 
 type accountDelta struct {
-	updatedBalances map[string]int
-	oldState        api.AccountState
+	updatedBalances       map[string]int
+	oldState              api.AccountState
+	appliedUpdatesBySeqId map[int]bool
 }
 
 func newAccountDelta(oldState api.AccountState) *accountDelta {
 	return &accountDelta{
-		updatedBalances: make(map[string]int),
-		oldState:        oldState,
+		updatedBalances:       make(map[string]int),
+		appliedUpdatesBySeqId: make(map[int]bool),
+		oldState:              oldState,
 	}
 }
 
@@ -27,13 +31,17 @@ func (s *accountDelta) GetAccount(name string) api.AccountValue {
 	}
 }
 
-func (s *accountDelta) ApplyUpdates(updates []api.AccountUpdate) {
+func (s *accountDelta) ApplyUpdates(seqId int, updates []api.AccountUpdate) {
 	for _, update := range updates {
 		s.write(update)
 	}
+	s.appliedUpdatesBySeqId[seqId] = true
 }
 
-func (s *accountDelta) RevertUpdates(updates []api.AccountUpdate) {
+func (s *accountDelta) RevertUpdates(seqId int, updates []api.AccountUpdate) {
+	if !s.appliedUpdatesBySeqId[seqId] {
+		return
+	}
 	for _, update := range updates {
 		inverseUpdate := api.AccountUpdate{
 			Name:          update.Name,
@@ -41,6 +49,7 @@ func (s *accountDelta) RevertUpdates(updates []api.AccountUpdate) {
 		}
 		s.write(inverseUpdate)
 	}
+	s.appliedUpdatesBySeqId[seqId] = false
 }
 
 func (s *accountDelta) write(update api.AccountUpdate) {
@@ -64,4 +73,12 @@ func (s *accountDelta) UpdatedValues() []api.AccountValue {
 	}
 
 	return updatedValues
+}
+
+func (s *accountDelta) String() string {
+	serUpdatedState := make([]string, 0, len(s.updatedBalances))
+	for name, balance := range s.updatedBalances {
+		serUpdatedState = append(serUpdatedState, fmt.Sprintf("(%s, %d)", name, balance))
+	}
+	return fmt.Sprintf("delta{updatedState: %s}", strings.Join(serUpdatedState, ", "))
 }
