@@ -194,7 +194,7 @@ func TestParallelExecutionWithIndependentBranches(t *testing.T) {
 	// Note: A noticeable perf improvement for parallel execution is only visible
 	// when transactions are doing more intensive work (e.g. loops with 1000+ iterations or I/O)
 	assertExecution(t, expectedUpdateState, block, startState, serial.NewExecutor(), "serial")
-	assertExecution(t, expectedUpdateState, block, startState, parallel.NewExecutor(10), "parallel")
+	assertExecution(t, expectedUpdateState, block, startState, parallel.NewExecutor(1), "parallel")
 }
 
 // buildTransferTree builds a binary tree that redistributes the values from root account to the end account

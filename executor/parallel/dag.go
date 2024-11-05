@@ -164,11 +164,6 @@ func (dag *dependencyDag) execute(state *accountDelta, nWorkers int) {
 				// so we must always re-execute it to see if anything changed, until we traverse the graph fully.
 				reExecutedNode := executeTransaction(state, node.seqId, *node.transaction)
 
-				//isBadUpdate := len(dag.dependants(4)) == 2
-				//isBadUpdate := dag.dependenciesById[5][4] && dag.dependenciesById[6][4]
-				//isBadUpdate := strings.Contains(queue.String(), "[4,1]")
-				//isBadUpdate = isBadUpdate
-
 				diff := dag.update(reExecutedNode)
 				fmt.Printf("# node: %s\n", node.String())
 				fmt.Printf("# re-executed node: %s\n", reExecutedNode.String())
@@ -176,8 +171,8 @@ func (dag *dependencyDag) execute(state *accountDelta, nWorkers int) {
 				fmt.Printf("# execution order: %v\n", executionOrder)
 				fmt.Printf("# execution queue: %v\n", queue.String())
 				fmt.Printf("# visited: %v\n", executor.visited)
-				//fmt.Printf("# execution queue: %v\n", executor.q)
-				fmt.Println(dag.Graphviz(fmt.Sprintf("After_%d_iter_%d", reExecutedNode.seqId, iteration), fmt.Sprintf("%d", iteration)))
+				fmt.Printf("# state: %s\n", state.String())
+				fmt.Println(dag.Graphviz(fmt.Sprintf("After_%d_iter_%d", reExecutedNode.seqId, iteration), fmt.Sprintf("%d", iteration), reExecutedNode.seqId))
 				fmt.Println()
 
 				// The new updates may affect new nodes in the DAG,
@@ -191,7 +186,7 @@ func (dag *dependencyDag) execute(state *accountDelta, nWorkers int) {
 					dq = dq[1:]
 
 					descendantNode := dag.lookup(descendantSeqId)
-					state.RevertUpdates(descendantNode.updates)
+					state.RevertUpdates(descendantNode.seqId, descendantNode.updates)
 					executor.markUnvisited(descendantSeqId)
 
 					// TODO(perf): Only push the ones that weren't visited yet
@@ -199,7 +194,7 @@ func (dag *dependencyDag) execute(state *accountDelta, nWorkers int) {
 				}
 
 				if len(diff.newDependencies) == 0 {
-					state.ApplyUpdates(reExecutedNode.updates)
+					state.ApplyUpdates(reExecutedNode.seqId, reExecutedNode.updates)
 				} else {
 					// This node was moved to a different part of the DAG
 					// and should be processed again at a later point.
@@ -222,7 +217,7 @@ func (dag *dependencyDag) execute(state *accountDelta, nWorkers int) {
 // Graphviz outputs a graph in DOT graphing language.
 // See: https://graphviz.org/doc/info/lang.html
 // View online: https://dreampuf.github.io/GraphvizOnline
-func (dag *dependencyDag) Graphviz(graphName, nodePostfix string) string {
+func (dag *dependencyDag) Graphviz(graphName, nodePostfix string, highlightedSeqId int) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("subgraph %s {\n", graphName))
 
@@ -237,14 +232,19 @@ func (dag *dependencyDag) Graphviz(graphName, nodePostfix string) string {
 		return hex
 	}
 	randomHexColor := func() string {
-		red := rand.Intn(255)
-		green := rand.Intn(255)
-		blue := rand.Intn(255)
+		minColor := 180
+		red := minColor + rand.Intn(255-minColor)
+		green := minColor + rand.Intn(255-minColor)
+		blue := minColor + rand.Intn(255-minColor)
 		return "#" + intToHex(red) + intToHex(green) + intToHex(blue)
 	}
 
-	sb.WriteString(fmt.Sprintf("\tnode [style=filled,color=\"%s\"];\n", randomHexColor()))
+	color := randomHexColor()
+	sb.WriteString(fmt.Sprintf("\tnode [style=filled,color=\"%s\"];\n", color))
 	for _, node := range dag.nodes {
+		if node.seqId == highlightedSeqId {
+			sb.WriteString(fmt.Sprintf("\t%s [color=\"#ffa500\", penwidth=3, fillcolor=\"%s\", style=\"filled\"];\n", nodeName(node.seqId), color))
+		}
 		if len(dag.dependants(node.seqId)) == 0 && len(dag.dependencies(node.seqId)) == 0 {
 			sb.WriteString(fmt.Sprintf("\t%s;\n", nodeName(node.seqId)))
 			continue
@@ -373,10 +373,18 @@ func (q *channelProcessingQueue) String() string {
 
 // conflictingAccounts returns account names that cause the dependency relationship between given nodes.
 func conflictingAccounts(dependency, dependant *executionNode) []string {
-	var intersections []string
-	intersections = append(intersections, intersect(dependency.updates, dependant.reads)...)
-	intersections = append(intersections, intersect(dependant.updates, dependency.reads)...)
-	return intersections
+	intersections := make(map[string]bool)
+	for _, name := range intersect(dependency.updates, dependant.reads) {
+		intersections[name] = true
+	}
+	for _, name := range intersect(dependant.updates, dependency.reads) {
+		intersections[name] = true
+	}
+	var unique []string
+	for name := range intersections {
+		unique = append(unique, name)
+	}
+	return unique
 }
 
 func intersect(updates []api.AccountUpdate, reads []string) []string {

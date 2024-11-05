@@ -80,5 +80,15 @@ func (s *accountDelta) String() string {
 	for name, balance := range s.updatedBalances {
 		serUpdatedState = append(serUpdatedState, fmt.Sprintf("(%s, %d)", name, balance))
 	}
-	return fmt.Sprintf("delta{updatedState: %s}", strings.Join(serUpdatedState, ", "))
+	serSeqIds := make([]string, 0, len(s.appliedUpdatesBySeqId))
+	for seqId, isApplied := range s.appliedUpdatesBySeqId {
+		if isApplied {
+			serSeqIds = append(serSeqIds, fmt.Sprintf("%d", seqId))
+		}
+	}
+	return fmt.Sprintf(
+		"delta{updatedState: %s, updatesFrom: %s}",
+		strings.Join(serUpdatedState, ", "),
+		strings.Join(serSeqIds, ", "),
+	)
 }
