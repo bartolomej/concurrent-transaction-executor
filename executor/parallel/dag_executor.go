@@ -1,23 +1,22 @@
 package parallel
 
 import (
-	"fmt"
 	"sync"
 )
 
 // dagExecutor handles topologically traversing the DAG and scheduling concurrent processing for independent set of nodes
 type dagExecutor struct {
 	// nodes in q were already processed
-	// and are waiting to be traversed to enqueue their dependants
+	// and are waiting to be traversed to enqueue their Dependants
 	q               []int
 	wg              sync.WaitGroup
 	currBatch       []processingTask
 	visited         []bool
-	dag             *dependencyDag
+	dag             *DependencyDag
 	processingQueue processingQueue
 }
 
-func newDagExecutor(dag *dependencyDag, queue processingQueue) dagExecutor {
+func newDagExecutor(dag *DependencyDag, queue processingQueue) dagExecutor {
 	return dagExecutor{
 		visited:         make([]bool, len(dag.nodes)),
 		dag:             dag,
@@ -25,11 +24,10 @@ func newDagExecutor(dag *dependencyDag, queue processingQueue) dagExecutor {
 	}
 }
 
-// TODO(perf): If channel queue scheduling is a bottleneck, pushing a batch of tasks to chan processingTask[] instead
 func (e *dagExecutor) execute() {
 
 	for seqId := range e.dag.nodes {
-		if len(e.dag.dependencies(seqId)) == 0 {
+		if len(e.dag.Dependencies(seqId)) == 0 {
 			e.schedule(seqId)
 		}
 	}
@@ -42,12 +40,13 @@ func (e *dagExecutor) execute() {
 		for i := 0; i < n; i++ {
 			seqId := e.q[i]
 
-			// TODO: If seqId is one of the elements in the queue (e.g. added in one of the previous iterations of the inner loop),
-			// 	don't enqueue it's dependants because we first need to process the nodes leading up to seqId (it's dependencies changed)
-			// 	This condition is supposed to take care of that.
-			// Some dependencies were invalidated since last processing,
-			// so node must be reprocessed again at some future point.
+			// Stop with further sub-graph traversal from the current node,
+			// because the current node has new Dependencies,
+			// which must be reprocessed first.
 			if len(e.unvisitedDependencies(seqId)) > 0 {
+				// We can safely skip this node,
+				// since the path from one of the new Dependencies
+				// will lead to this node eventually.
 				continue
 			}
 
@@ -59,8 +58,6 @@ func (e *dagExecutor) execute() {
 					e.schedule(depSeqId)
 				}
 			}
-
-			fmt.Printf("# visit queue: %v (%d)\n", e.q, seqId)
 		}
 		e.q = e.q[n:]
 
@@ -72,7 +69,7 @@ func (e *dagExecutor) execute() {
 
 func (e *dagExecutor) unvisitedDependencies(seqId int) []int {
 	unvisited := make([]int, 0)
-	for _, depSeqId := range e.dag.dependencies(seqId) {
+	for _, depSeqId := range e.dag.Dependencies(seqId) {
 		if !e.visited[depSeqId] {
 			unvisited = append(unvisited, depSeqId)
 		}
@@ -82,7 +79,7 @@ func (e *dagExecutor) unvisitedDependencies(seqId int) []int {
 
 func (e *dagExecutor) unvisitedDependants(seqId int) []int {
 	unvisited := make([]int, 0)
-	for _, depSeqId := range e.dag.dependants(seqId) {
+	for _, depSeqId := range e.dag.Dependants(seqId) {
 		if !e.visited[depSeqId] {
 			unvisited = append(unvisited, depSeqId)
 		}
@@ -101,7 +98,7 @@ func (e *dagExecutor) schedule(seqId int) {
 	e.q = append(e.q, seqId)
 }
 
-// Can be called concurrently for different seqId values
+// Can be called concurrently for different SeqId values
 func (e *dagExecutor) markUnvisited(seqId int) {
 	e.visited[seqId] = false
 }

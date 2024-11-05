@@ -1,17 +1,19 @@
 package serial
 
 import (
-	"blockchain/executor/api"
+	"blockchain/executor/types"
 	"fmt"
 )
 
 type Executor struct{}
 
+var _ types.BlockExecutor = &Executor{}
+
 func NewExecutor() *Executor {
 	return &Executor{}
 }
 
-func (e *Executor) ExecuteBlock(block api.Block, startState api.AccountState) ([]api.AccountValue, error) {
+func (e *Executor) Execute(block types.Block, startState types.AccountState) ([]types.AccountValue, error) {
 	blockState := newExecutorState(startState)
 
 	for i, tx := range block.Transactions {
@@ -28,41 +30,41 @@ func (e *Executor) ExecuteBlock(block api.Block, startState api.AccountState) ([
 
 type executorState struct {
 	uncommitedBalancesByName map[string]uint
-	startState               api.AccountState
+	startState               types.AccountState
 }
 
-func newExecutorState(startState api.AccountState) *executorState {
+func newExecutorState(startState types.AccountState) *executorState {
 	return &executorState{
 		startState:               startState,
 		uncommitedBalancesByName: make(map[string]uint),
 	}
 }
 
-func (s *executorState) GetAccount(name string) api.AccountValue {
+func (s *executorState) Get(name string) types.AccountValue {
 	_, ok := s.uncommitedBalancesByName[name]
 
 	if !ok {
-		return s.startState.GetAccount(name)
+		return s.startState.Get(name)
 	}
 
-	return api.AccountValue{Name: name, Balance: s.uncommitedBalancesByName[name]}
+	return types.AccountValue{Name: name, Balance: s.uncommitedBalancesByName[name]}
 }
 
-func (s *executorState) ApplyUpdates(updates []api.AccountUpdate) {
+func (s *executorState) ApplyUpdates(updates []types.AccountUpdate) {
 	for _, u := range updates {
 		_, ok := s.uncommitedBalancesByName[u.Name]
 		if !ok {
-			s.uncommitedBalancesByName[u.Name] = s.startState.GetAccount(u.Name).Balance
+			s.uncommitedBalancesByName[u.Name] = s.startState.Get(u.Name).Balance
 		}
 		s.uncommitedBalancesByName[u.Name] += uint(u.BalanceChange)
 	}
 }
 
-func (s *executorState) UpdatedAccountValues() []api.AccountValue {
-	var updatedValues []api.AccountValue
+func (s *executorState) UpdatedAccountValues() []types.AccountValue {
+	var updatedValues []types.AccountValue
 	for k, v := range s.uncommitedBalancesByName {
-		if s.startState.GetAccount(k).Balance != v {
-			updatedValues = append(updatedValues, api.AccountValue{
+		if s.startState.Get(k).Balance != v {
+			updatedValues = append(updatedValues, types.AccountValue{
 				Name:    k,
 				Balance: v,
 			})

@@ -1,41 +1,41 @@
 package parallel
 
 import (
-	"blockchain/executor/api"
+	"blockchain/executor/types"
 	"slices"
 	"testing"
 )
 
 func TestDag1(t *testing.T) {
-	nodes := []*executionNode{
+	nodes := []*ExecutionNode{
 		{
-			seqId: 0,
-			reads: []string{"A", "B"},
-			updates: []api.AccountUpdate{
+			SeqId: 0,
+			Reads: []string{"A", "B"},
+			Updates: []types.AccountUpdate{
 				{Name: "A"},
 			},
 		},
 		{
-			seqId: 1,
-			reads: []string{"A"},
-			updates: []api.AccountUpdate{
+			SeqId: 1,
+			Reads: []string{"A"},
+			Updates: []types.AccountUpdate{
 				{Name: "B"},
 			},
 		},
 		{
-			seqId: 2,
-			reads: []string{"A", "B"},
-			updates: []api.AccountUpdate{
+			SeqId: 2,
+			Reads: []string{"A", "B"},
+			Updates: []types.AccountUpdate{
 				{Name: "A"},
 				{Name: "B"},
 			},
 		},
 	}
 
-	actual := newDependencyDag(nodes)
+	actual := NewDependencyDag(nodes)
 
-	expected := &dependencyDag{
-		nodes: []*executionNode{
+	expected := &DependencyDag{
+		nodes: []*ExecutionNode{
 			0: nodes[0],
 			1: nodes[1],
 			2: nodes[2],
@@ -56,43 +56,43 @@ func TestDag1(t *testing.T) {
 }
 
 func TestDag2(t *testing.T) {
-	nodes := []*executionNode{
+	nodes := []*ExecutionNode{
 		{
-			seqId: 0,
-			reads: []string{"A"},
-			updates: []api.AccountUpdate{
+			SeqId: 0,
+			Reads: []string{"A"},
+			Updates: []types.AccountUpdate{
 				{Name: "A", BalanceChange: -10},
 				{Name: "B", BalanceChange: 10},
 			},
 		},
 		{
-			seqId: 1,
-			reads: []string{"A"},
-			updates: []api.AccountUpdate{
+			SeqId: 1,
+			Reads: []string{"A"},
+			Updates: []types.AccountUpdate{
 				{Name: "A", BalanceChange: -10},
 				{Name: "C", BalanceChange: 10},
 			},
 		},
 		{
-			seqId:   2,
-			reads:   []string{"B"},
-			updates: []api.AccountUpdate{},
+			SeqId:   2,
+			Reads:   []string{"B"},
+			Updates: []types.AccountUpdate{},
 		},
-		// If N+1 node updates state that N node reads,
+		// If N+1 node Updates state that N node Reads,
 		// N+1 node must be scheduled after N, since it can affect its output.
 		{
-			seqId: 3,
-			reads: []string{"D"},
-			updates: []api.AccountUpdate{
+			SeqId: 3,
+			Reads: []string{"D"},
+			Updates: []types.AccountUpdate{
 				{Name: "B"},
 			},
 		},
 	}
 
-	actual := newDependencyDag(nodes)
+	actual := NewDependencyDag(nodes)
 
-	expected := &dependencyDag{
-		nodes: []*executionNode{
+	expected := &DependencyDag{
+		nodes: []*ExecutionNode{
 			0: nodes[0],
 			1: nodes[1],
 			2: nodes[2],
@@ -135,14 +135,14 @@ func TestDag2(t *testing.T) {
 	assertQueueEqual(t, testQueue, expectedWalkOrder)
 }
 
-// TODO: Test dag update
+// TODO: Test dag Update
 func TestDagUpdate(t *testing.T) {
-	nodes := []*executionNode{}
+	nodes := []*ExecutionNode{}
 
-	actual := newDependencyDag(nodes)
+	actual := NewDependencyDag(nodes)
 
-	expected := &dependencyDag{
-		nodes:            []*executionNode{},
+	expected := &DependencyDag{
+		nodes:            []*ExecutionNode{},
 		dependantsById:   map[int]map[int]bool{},
 		dependenciesById: map[int]map[int]bool{},
 	}
@@ -151,35 +151,35 @@ func TestDagUpdate(t *testing.T) {
 }
 
 func TestConcurrentWalk1(t *testing.T) {
-	dag := newDependencyDag([]*executionNode{
+	dag := NewDependencyDag([]*ExecutionNode{
 		{
-			seqId: 0,
-			reads: []string{"A"},
-			updates: []api.AccountUpdate{
+			SeqId: 0,
+			Reads: []string{"A"},
+			Updates: []types.AccountUpdate{
 				{Name: "A"},
 			},
 		},
 		{
-			seqId: 1,
-			reads: []string{"B"},
-			updates: []api.AccountUpdate{
+			SeqId: 1,
+			Reads: []string{"B"},
+			Updates: []types.AccountUpdate{
 				{Name: "B"},
 			},
 		},
 		{
-			seqId: 2,
-			reads: []string{"A"},
-			updates: []api.AccountUpdate{
+			SeqId: 2,
+			Reads: []string{"A"},
+			Updates: []types.AccountUpdate{
 				{Name: "B"},
 			},
 		},
 		{
-			seqId: 3,
-			reads: []string{"A"},
+			SeqId: 3,
+			Reads: []string{"A"},
 		},
 		{
-			seqId: 4,
-			reads: []string{"A", "B"},
+			SeqId: 4,
+			Reads: []string{"A", "B"},
 		},
 	})
 
@@ -198,42 +198,42 @@ func TestConcurrentWalk1(t *testing.T) {
 
 // Verifies that long independent branches are processed concurrently
 func TestConcurrentWalk2(t *testing.T) {
-	dag := newDependencyDag([]*executionNode{
+	dag := NewDependencyDag([]*ExecutionNode{
 		{
-			seqId: 0,
-			reads: []string{"A"},
-			updates: []api.AccountUpdate{
+			SeqId: 0,
+			Reads: []string{"A"},
+			Updates: []types.AccountUpdate{
 				{Name: "B"},
 			},
 		},
 		{
-			seqId: 1,
-			reads: []string{"A"},
-			updates: []api.AccountUpdate{
+			SeqId: 1,
+			Reads: []string{"A"},
+			Updates: []types.AccountUpdate{
 				{Name: "C"},
 			},
 		},
 		{
-			seqId: 2,
-			reads: []string{"B"},
-			updates: []api.AccountUpdate{
+			SeqId: 2,
+			Reads: []string{"B"},
+			Updates: []types.AccountUpdate{
 				{Name: "D"},
 			},
 		},
 		{
-			seqId: 3,
-			reads: []string{"C"},
-			updates: []api.AccountUpdate{
+			SeqId: 3,
+			Reads: []string{"C"},
+			Updates: []types.AccountUpdate{
 				{Name: "E"},
 			},
 		},
 		{
-			seqId: 4,
-			reads: []string{"D"},
+			SeqId: 4,
+			Reads: []string{"D"},
 		},
 		{
-			seqId: 5,
-			reads: []string{"E"},
+			SeqId: 5,
+			Reads: []string{"E"},
 		},
 	})
 
@@ -280,7 +280,7 @@ func (q *testDagQueue) close() {
 
 var _ processingQueue = &testDagQueue{}
 
-func assertDagEqual(t *testing.T, actual, expected *dependencyDag) {
+func assertDagEqual(t *testing.T, actual, expected *DependencyDag) {
 	if actual.String() != expected.String() {
 		t.Errorf("actual %v, expected %v", actual, expected)
 	}

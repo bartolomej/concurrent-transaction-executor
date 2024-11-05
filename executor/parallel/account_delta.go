@@ -1,18 +1,19 @@
 package parallel
 
 import (
-	"blockchain/executor/api"
+	"blockchain/executor/types"
 	"fmt"
 	"strings"
 )
 
+// accountDelta keeps track of the updated state and supports writing and reverting state changes
 type accountDelta struct {
 	updatedBalances       map[string]int
-	oldState              api.AccountState
+	oldState              types.AccountState
 	appliedUpdatesBySeqId map[int]bool
 }
 
-func newAccountDelta(oldState api.AccountState) *accountDelta {
+func newAccountDelta(oldState types.AccountState) *accountDelta {
 	return &accountDelta{
 		updatedBalances:       make(map[string]int),
 		appliedUpdatesBySeqId: make(map[int]bool),
@@ -20,23 +21,23 @@ func newAccountDelta(oldState api.AccountState) *accountDelta {
 	}
 }
 
-func (s *accountDelta) GetAccount(name string) api.AccountValue {
+func (s *accountDelta) Get(name string) types.AccountValue {
 	if balance, ok := s.updatedBalances[name]; ok {
-		return api.AccountValue{
+		return types.AccountValue{
 			Name:    name,
 			Balance: uint(balance),
 		}
 	} else {
-		return s.oldState.GetAccount(name)
+		return s.oldState.Get(name)
 	}
 }
 
-func (s *accountDelta) ApplyUpdates(seqId int, updates []api.AccountUpdate) {
+func (s *accountDelta) ApplyUpdates(seqId int, updates []types.AccountUpdate) {
 	if len(updates) == 0 {
 		return
 	}
 	if s.appliedUpdatesBySeqId[seqId] {
-		panic(fmt.Sprintf("updates were already applied for node %d", seqId))
+		panic(fmt.Sprintf("Updates were already applied for node %d", seqId))
 	}
 	for _, update := range updates {
 		s.write(update)
@@ -44,12 +45,12 @@ func (s *accountDelta) ApplyUpdates(seqId int, updates []api.AccountUpdate) {
 	s.appliedUpdatesBySeqId[seqId] = true
 }
 
-func (s *accountDelta) RevertUpdates(seqId int, updates []api.AccountUpdate) {
+func (s *accountDelta) RevertUpdates(seqId int, updates []types.AccountUpdate) {
 	if !s.appliedUpdatesBySeqId[seqId] {
 		return
 	}
 	for _, update := range updates {
-		inverseUpdate := api.AccountUpdate{
+		inverseUpdate := types.AccountUpdate{
 			Name:          update.Name,
 			BalanceChange: -update.BalanceChange,
 		}
@@ -58,20 +59,20 @@ func (s *accountDelta) RevertUpdates(seqId int, updates []api.AccountUpdate) {
 	s.appliedUpdatesBySeqId[seqId] = false
 }
 
-func (s *accountDelta) write(update api.AccountUpdate) {
+func (s *accountDelta) write(update types.AccountUpdate) {
 	_, ok := s.updatedBalances[update.Name]
 	if ok {
 		s.updatedBalances[update.Name] += update.BalanceChange
 	} else {
-		s.updatedBalances[update.Name] = int(s.oldState.GetAccount(update.Name).Balance) + update.BalanceChange
+		s.updatedBalances[update.Name] = int(s.oldState.Get(update.Name).Balance) + update.BalanceChange
 	}
 }
 
-func (s *accountDelta) UpdatedValues() []api.AccountValue {
-	var updatedValues []api.AccountValue
+func (s *accountDelta) UpdatedValues() []types.AccountValue {
+	var updatedValues []types.AccountValue
 	for name, updatedBalance := range s.updatedBalances {
-		if s.oldState.GetAccount(name).Balance != uint(updatedBalance) {
-			updatedValues = append(updatedValues, api.AccountValue{
+		if s.oldState.Get(name).Balance != uint(updatedBalance) {
+			updatedValues = append(updatedValues, types.AccountValue{
 				Name:    name,
 				Balance: uint(updatedBalance),
 			})
@@ -93,7 +94,7 @@ func (s *accountDelta) String() string {
 		}
 	}
 	return fmt.Sprintf(
-		"delta{updatedState: %s, updatesFrom: %s}",
+		"accountDelta{updatedState: %s, updatesFrom: %s}",
 		strings.Join(serUpdatedState, ", "),
 		strings.Join(serSeqIds, ", "),
 	)

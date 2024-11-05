@@ -1,7 +1,7 @@
 package transactions
 
 import (
-	"blockchain/executor/api"
+	"blockchain/executor/types"
 )
 
 type Mint struct {
@@ -9,8 +9,8 @@ type Mint struct {
 	Value uint
 }
 
-func (t Mint) Updates(state api.AccountState) ([]api.AccountUpdate, error) {
-	return []api.AccountUpdate{
+func (t Mint) Updates(state types.AccountState) ([]types.AccountUpdate, error) {
+	return []types.AccountUpdate{
 		{Name: t.To, BalanceChange: int(t.Value)},
 	}, nil
 }

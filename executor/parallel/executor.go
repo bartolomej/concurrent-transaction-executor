@@ -1,49 +1,48 @@
 package parallel
 
 import (
-	"blockchain/executor/api"
-	"sort"
+	"blockchain/executor/types"
 	"sync"
 )
 
 type Executor struct {
-	NWorkers int
+	nWorkers int
 }
+
+var _ types.BlockExecutor = &Executor{}
 
 func NewExecutor(nWorkers int) *Executor {
-	return &Executor{NWorkers: nWorkers}
+	return &Executor{nWorkers: nWorkers}
 }
 
-func (e *Executor) ExecuteBlock(block api.Block, state api.AccountState) ([]api.AccountValue, error) {
+func (e *Executor) Execute(block types.Block, state types.AccountState) ([]types.AccountValue, error) {
 	nodes := e.executeOptimistically(block.Transactions, state)
 
-	dag := newDependencyDag(nodes)
+	dag := NewDependencyDag(nodes)
 	delta := newAccountDelta(state)
 
-	dag.execute(delta, e.NWorkers)
+	dag.Execute(delta, e.nWorkers)
 
 	return delta.UpdatedValues(), nil
 }
 
-func (e *Executor) executeOptimistically(transactions []api.Transaction, state api.AccountState) []*executionNode {
+func (e *Executor) executeOptimistically(transactions []types.Transaction, state types.AccountState) []*ExecutionNode {
 	nTx := len(transactions)
-	nodeBatches := make([][]*executionNode, e.NWorkers)
+	nodeBatches := make([][]*ExecutionNode, e.nWorkers)
 
 	wg := sync.WaitGroup{}
-	for workerId := 0; workerId < e.NWorkers; workerId++ {
-		chunk := nTx / e.NWorkers
+	for workerId := 0; workerId < e.nWorkers; workerId++ {
+		chunk := nTx / e.nWorkers
 		startSeqId := chunk * workerId
 		endSeqId := startSeqId + chunk
-		if workerId == e.NWorkers-1 {
+		if workerId == e.nWorkers-1 {
 			endSeqId = nTx
 		}
 
 		wg.Add(1)
 		go func(workerId, startSeqId, endSeqId int, wg *sync.WaitGroup) {
-			nodeBatch := make([]*executionNode, 0, endSeqId-startSeqId)
+			nodeBatch := make([]*ExecutionNode, 0, endSeqId-startSeqId)
 			for seqId := startSeqId; seqId < endSeqId; seqId++ {
-				// TODO(perf): Avg execution time is sometimes still up to 2x larger than for serial processing,
-				//  see if we can improve it (e.g. reduce scheduling overheat, allocation,...)
 				nodeBatch = append(nodeBatch, executeTransaction(state, seqId, transactions[seqId]))
 			}
 			nodeBatches[workerId] = nodeBatch
@@ -53,7 +52,7 @@ func (e *Executor) executeOptimistically(transactions []api.Transaction, state a
 
 	wg.Wait()
 
-	nodes := make([]*executionNode, 0, len(transactions))
+	nodes := make([]*ExecutionNode, 0, len(transactions))
 	for _, batch := range nodeBatches {
 		for _, node := range batch {
 			nodes = append(nodes, node)
@@ -61,37 +60,4 @@ func (e *Executor) executeOptimistically(transactions []api.Transaction, state a
 	}
 
 	return nodes
-}
-
-func executeTransaction(state api.AccountState, seqId int, transaction api.Transaction) *executionNode {
-	proxy := stateProxy{readsLookup: make(map[string]bool), state: state}
-	updates, err := transaction.Updates(&proxy)
-
-	return &executionNode{
-		seqId:       seqId,
-		updates:     updates,
-		reads:       proxy.reads(),
-		err:         err,
-		transaction: &transaction,
-	}
-}
-
-type stateProxy struct {
-	readsLookup map[string]bool
-	state       api.AccountState
-}
-
-func (s *stateProxy) GetAccount(name string) api.AccountValue {
-	s.readsLookup[name] = true
-	return s.state.GetAccount(name)
-}
-
-func (s *stateProxy) reads() []string {
-	reads := make([]string, 0, len(s.readsLookup))
-	for read := range s.readsLookup {
-		reads = append(reads, read)
-	}
-	// Sort so that comparisons with slices.Equal work
-	sort.Strings(reads)
-	return reads
 }

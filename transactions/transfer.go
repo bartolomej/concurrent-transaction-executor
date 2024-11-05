@@ -1,7 +1,7 @@
 package transactions
 
 import (
-	"blockchain/executor/api"
+	"blockchain/executor/types"
 	"fmt"
 )
 
@@ -11,12 +11,12 @@ type Transfer struct {
 	Value uint
 }
 
-func (t Transfer) Updates(state api.AccountState) ([]api.AccountUpdate, error) {
-	fromAcc := state.GetAccount(t.From)
+func (t Transfer) Updates(state types.AccountState) ([]types.AccountUpdate, error) {
+	fromAcc := state.Get(t.From)
 	if fromAcc.Balance < t.Value {
 		return nil, fmt.Errorf("insufficient balance")
 	}
-	return []api.AccountUpdate{
+	return []types.AccountUpdate{
 		{Name: t.From, BalanceChange: -int(t.Value)},
 		{Name: t.To, BalanceChange: int(t.Value)},
 	}, nil
