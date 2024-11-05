@@ -3,9 +3,9 @@
 ## Background
 
 Transactions arrive to the system in an ordered sequence, where the `N`-th transaction can only affect the `N+M`-th transaction, but not the other way around. 
-In other words, if two transactions N and N+1 update the same state, N should always be executed before N+1.
+In other words, if two transactions `N` and `N+1` update the same state, `N` should always be executed before `N+1`.
 
-So to determine how to efficiently and deterministically execute the transactions concurrently, we must first determine the dependency structure of the transactions.
+To determine how to efficiently and deterministically execute the transactions concurrently, we must first determine their dependency structure.
 
 This would be easy if the dependencies were statically defined (e.g. at compile-time, in which case we could compile the transaction to have the full knowledge of its dependencies). 
 But that is not the case here, since our executor only receives a Go function reference, which can contain arbitrary code and have different dependencies depending on the current state.
@@ -57,26 +57,26 @@ Let's say our concurrent executor receives the following transactions:
 ```
 
 First, the executor will optimistically execute all the transactions concurrently to obtain the initial relationships. 
-This relationship info may not be correct, 
-since all transactions are executed against the initial state, 
-so some may read or update less/more than they actually would if they were executed in the correct order.
+These relationships may not be final or correct, 
+since all transactions are executed against the initial state
+(reads and updates could be different if they were instead executed against the correctly updated state).
 
 In our case, the 2nd transaction won't output the correct updates, since account B doesn't have sufficient balance in the initial state. 
 
-From this info, we build the initial DAG and start executing transactions without any dependencies (steps 1 and 2).
-After those were executed, and if no changes in their dependencies were found, 
+Next up, we'll build the initial DAG and start executing transactions without any dependencies (steps 1 and 2).
+After those are executed, and if no changes in their dependencies were found, 
 we continue our depth first traversal and execute their descendant transaction nodes (step 3).
 
 ![](./images/step_1_2_3.png)
 
-Here is where things get a little more interesting. We continue our traversal and execute the 2nd transaction again.
-Because the transaction 0 transferred balance from account `A` to `B`, account `B` now does have sufficient balance,
-which means this time the 2nd transaction will output the correct balance updates. 
-And since we already knew that the 3rd transaction reads the state from account `D` (which 2nd transaction updates), we can now update the DAG to reflect that and re-execute the 3rd transaction (note: we must also ensure the state update from previous execution is discarded).
+Things get more interesting when we execute the 2nd transaction.
+Because the 0-th transaction transferred balance from account `A` to `B`, account `B` now does have sufficient balance for the current transfer,
+which means the 2nd transaction will output the correct balance updates this time (`B`-10, `D`+10). 
+And since we already knew that the 3rd transaction reads the state from account `D` (which the 2nd transaction updates), we can now update the DAG to reflect that and re-execute the 3rd transaction (note: we must also ensure the state update from previous execution is discarded).
 
 ![](./images/step_4_5.png)
 
-After we are done with executing the last (3rd) transaction and if we find no new dependants / dependencies, we can be sure to arrive at the correct end state:
+After we are done with executing the last (3rd) transaction and if we find no new dependants / dependencies, we can be sure the state is correct and final:
 
 ```go
 {
