@@ -1,7 +1,6 @@
-package tools
+package parallel
 
 import (
-	"blockchain/executor/parallel"
 	"blockchain/executor/types"
 	"fmt"
 	"math/rand"
@@ -14,31 +13,50 @@ import (
 type Graphviz struct {
 	Name string
 	// Seq IDs of outlined nodes
-	OutlinedNodes map[int]bool
-	Dag           *parallel.DependencyDag
+	OutlinedNodes    map[int]bool
+	NodeFillColor    Color
+	NodeOutlineColor Color
+	NodeLabelColor   Color
+	EdgeLabelColor   Color
+	EdgeFillColor    Color
+	Dag              *DependencyDag
+}
+
+func (g *Graphviz) String() string {
+	return g.Generate()
 }
 
 func (g *Graphviz) Generate() string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("digraph %s {\n", g.Name))
 
-	color := randomHexColor()
-	sb.WriteString(fmt.Sprintf("\tnode [style=filled,color=\"%s\"];\n", color))
+	sb.WriteString(fmt.Sprintf("digraph %s {\n", g.Name))
+	sb.WriteString(fmt.Sprintf(
+		"\tnode [style=filled, color=\"%s\", fontcolor=\"%s\"];\n",
+		g.NodeFillColor,
+		g.NodeLabelColor,
+	))
+
 	for _, seqId := range g.Dag.NodeSeqIds() {
 		node := g.Dag.Get(seqId)
-		if g.OutlinedNodes[seqId] {
-			sb.WriteString(fmt.Sprintf("\t%s [color=\"#ffa500\", penwidth=3, fillcolor=\"%s\", style=\"filled\"];\n", g.nodeName(seqId), color))
-		}
 		if len(g.Dag.Dependants(seqId)) == 0 && len(g.Dag.Dependencies(seqId)) == 0 {
 			sb.WriteString(fmt.Sprintf("\t%s;\n", g.nodeName(seqId)))
-			continue
 		}
 		for _, depSeqId := range g.Dag.Dependants(seqId) {
 			depNode := g.Dag.Get(depSeqId)
 			sb.WriteString(fmt.Sprintf("\t%s -> %s ", g.nodeName(seqId), g.nodeName(depSeqId)))
 			sb.WriteString(fmt.Sprintf(
-				"[label=\"%s\", fontsize=8, fontcolor=\"#a0a0a0\"];\n",
+				"[label=\"%s\", fontsize=8, fontcolor=\"%s\", color=\"%s\"];\n",
 				conflictingAccounts(node, depNode),
+				g.EdgeLabelColor,
+				g.EdgeFillColor,
+			))
+		}
+		if g.OutlinedNodes[seqId] {
+			sb.WriteString(fmt.Sprintf(
+				"\t%s [color=\"%s\", penwidth=3, fillcolor=\"%s\", style=\"filled\"];\n",
+				g.nodeName(seqId),
+				g.NodeOutlineColor,
+				g.NodeFillColor,
 			))
 		}
 	}
@@ -50,28 +68,44 @@ func (g *Graphviz) nodeName(seqId int) string {
 	return fmt.Sprintf("%d", seqId)
 }
 
-func randomHexColor() string {
-	return fmt.Sprintf(
-		"#%s%s%s",
-		randomHexColorComponent(),
-		randomHexColorComponent(),
-		randomHexColorComponent(),
-	)
+type Color struct {
+	R, G, B uint8
 }
 
-func randomHexColorComponent() string {
+func NewRgbColor(r, g, b uint8) Color {
+	return Color{r, g, b}
+}
+
+func NewRandomColor() Color {
 	// Prefer lighter colors, so that foreground text is easily visible.
 	minValue := 180
-	value := rand.Intn(255 - minValue)
-	hex := fmt.Sprintf("%x", value)
-	if len(hex) == 1 {
-		hex = "0" + hex
+	return Color{
+		R: uint8(rand.Intn(255 - minValue)),
+		G: uint8(rand.Intn(255 - minValue)),
+		B: uint8(rand.Intn(255 - minValue)),
 	}
-	return hex
+}
+
+func (c Color) String() string {
+	return c.hex()
+}
+
+func (c Color) hex() string {
+	var components = []uint8{
+		c.R,
+		c.G,
+		c.B,
+	}
+	var sb strings.Builder
+	sb.WriteString("#")
+	for _, component := range components {
+		sb.WriteString(fmt.Sprintf("%02X", component))
+	}
+	return sb.String()
 }
 
 // conflictingAccounts returns account names that cause the dependency relationship between given nodes.
-func conflictingAccounts(dependency, dependant *parallel.ExecutionNode) []string {
+func conflictingAccounts(dependency, dependant *ExecutionNode) []string {
 	intersections := make(map[string]bool)
 	for _, name := range intersect(dependency.Updates, dependant.Reads) {
 		intersections[name] = true

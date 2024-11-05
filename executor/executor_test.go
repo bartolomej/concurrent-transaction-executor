@@ -113,9 +113,9 @@ func TestBlockingSequentialTransactions(t *testing.T) {
 	}
 	block1 := types.Block{
 		Transactions: []types.Transaction{
-			longRunningTx{
-				duration:  time.Second,
-				delayedTx: mintTx,
+			sleepingTransaction{
+				duration: time.Second,
+				child:    mintTx,
 			},
 			condBulkTransferTx,
 		},
@@ -123,9 +123,9 @@ func TestBlockingSequentialTransactions(t *testing.T) {
 	block2 := types.Block{
 		Transactions: []types.Transaction{
 			mintTx,
-			longRunningTx{
-				duration:  time.Second,
-				delayedTx: condBulkTransferTx,
+			sleepingTransaction{
+				duration: time.Second,
+				child:    condBulkTransferTx,
 			},
 		},
 	}
@@ -174,8 +174,8 @@ func TestTreeLikeConcurrentTransactions(t *testing.T) {
 
 // buildTransferTree builds a binary tree that redistributes the values from root account to the end account
 // where the transaction dependency graph is in the shape of a binary tree with height low2(rootBalance)
-func buildTransferTree(id *int, from string, amount uint, endAccount string) []transactions.Transfer {
-	var txs []transactions.Transfer
+func buildTransferTree(id *int, from string, amount uint, endAccount string) []sleepingTransaction {
+	var txs []sleepingTransaction
 	var to = fmt.Sprintf("%s_%d", from, *id)
 	// Stop condition - subdivide the amount anymore
 	var isLeaf = amount == 1
@@ -185,10 +185,13 @@ func buildTransferTree(id *int, from string, amount uint, endAccount string) []t
 		to = endAccount
 	}
 
-	txs = append(txs, transactions.Transfer{
-		From:  from,
-		To:    to,
-		Value: amount,
+	txs = append(txs, sleepingTransaction{
+		duration: time.Millisecond * 100,
+		child: transactions.Transfer{
+			From:  from,
+			To:    to,
+			Value: amount,
+		},
 	})
 
 	if isLeaf {
@@ -203,14 +206,21 @@ func buildTransferTree(id *int, from string, amount uint, endAccount string) []t
 	return txs
 }
 
-type longRunningTx struct {
-	duration  time.Duration
-	delayedTx types.Transaction
+// sleepingTransaction sleeps for duration before executing the child transaction to simulate I/O operations.
+type sleepingTransaction struct {
+	duration time.Duration
+	child    types.Transaction
 }
 
-func (tx longRunningTx) Updates(state types.AccountState) ([]types.AccountUpdate, error) {
+var _ types.Transaction = sleepingTransaction{}
+
+func (tx sleepingTransaction) Updates(state types.AccountState) ([]types.AccountUpdate, error) {
 	time.Sleep(tx.duration)
-	return tx.delayedTx.Updates(state)
+	return tx.child.Updates(state)
+}
+
+func (tx sleepingTransaction) String() string {
+	return "sleepingTransaction"
 }
 
 // conditionalBulkTransfer empties from balances and transfers them to
@@ -223,16 +233,18 @@ type conditionalBulkTransfer struct {
 	untilBalanceEquals uint
 }
 
-func (t conditionalBulkTransfer) Updates(state types.AccountState) ([]types.AccountUpdate, error) {
+var _ types.Transaction = conditionalBulkTransfer{}
+
+func (tx conditionalBulkTransfer) Updates(state types.AccountState) ([]types.AccountUpdate, error) {
 	var updates []types.AccountUpdate
-	for i, from := range t.from {
-		to := t.to[i]
+	for i, from := range tx.from {
+		to := tx.to[i]
 		acc := state.Get(from)
-		if acc.Balance == t.untilBalanceEquals {
+		if acc.Balance == tx.untilBalanceEquals {
 			transfer := transactions.Transfer{
 				From:  from,
 				To:    to,
-				Value: t.value,
+				Value: tx.value,
 			}
 			transferUpdates, transferErr := transfer.Updates(state)
 			if transferErr != nil {
@@ -244,6 +256,10 @@ func (t conditionalBulkTransfer) Updates(state types.AccountState) ([]types.Acco
 		}
 	}
 	return updates, nil
+}
+
+func (tx conditionalBulkTransfer) String() string {
+	return "conditionalBulkTransfer"
 }
 
 type testAccountState []types.AccountValue
