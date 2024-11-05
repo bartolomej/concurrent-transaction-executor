@@ -36,6 +36,10 @@ func newDependencyDag(nodes []*executionNode) *dependencyDag {
 }
 
 func (dag *dependencyDag) computeEdges() {
+	// Reset the maps or out-of-date values could be left there unintentionally
+	dag.dependenciesById = make(map[int]map[int]bool)
+	dag.dependantsById = make(map[int]map[int]bool)
+
 	seqIdsByRead := make(map[string]map[int]bool)
 	seqIdsByUpdate := make(map[string]map[int]bool)
 
@@ -66,8 +70,6 @@ func (dag *dependencyDag) computeEdges() {
 			}
 			dag.dependantsById[depSeqId][node.seqId] = true
 		}
-
-		dag.nodes[node.seqId] = node
 
 		for _, update := range node.updates {
 			_, ok := seqIdsByUpdate[update.Name]
@@ -121,12 +123,11 @@ func (dag *dependencyDag) update(newNode *executionNode) updateDiff {
 		panic(fmt.Sprintf("cannot call update for new node with seqId %d", newNode.seqId))
 	}
 
-	dag.nodes[newNode.seqId] = newNode
-
 	beforeDependants := dag.dependants(newNode.seqId)
 	beforeDependencies := dag.dependencies(newNode.seqId)
 
 	// TODO(perf): Incrementally (without rebuilding the whole graph) compute edges?
+	dag.nodes[newNode.seqId] = newNode
 	dag.computeEdges()
 
 	afterDependants := dag.dependants(newNode.seqId)
