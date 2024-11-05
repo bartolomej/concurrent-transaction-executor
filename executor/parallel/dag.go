@@ -250,7 +250,11 @@ func (dag *dependencyDag) Graphviz(graphName, nodePostfix string) string {
 			continue
 		}
 		for _, depSeqId := range dag.dependants(node.seqId) {
-			sb.WriteString(fmt.Sprintf("\t%s -> %s;\n", nodeName(node.seqId), nodeName(depSeqId)))
+			sb.WriteString(fmt.Sprintf("\t%s -> %s ", nodeName(node.seqId), nodeName(depSeqId)))
+			sb.WriteString(fmt.Sprintf(
+				"[label=\"%s\", fontsize=8, fontcolor=\"#a0a0a0\"];\n",
+				conflictingAccounts(node, dag.lookup(depSeqId)),
+			))
 		}
 	}
 	sb.WriteString("}")
@@ -365,6 +369,28 @@ func (q *channelProcessingQueue) String() string {
 		}
 	}
 	return out.String()
+}
+
+// conflictingAccounts returns account names that cause the dependency relationship between given nodes.
+func conflictingAccounts(dependency, dependant *executionNode) []string {
+	var intersections []string
+	intersections = append(intersections, intersect(dependency.updates, dependant.reads)...)
+	intersections = append(intersections, intersect(dependant.updates, dependency.reads)...)
+	return intersections
+}
+
+func intersect(updates []api.AccountUpdate, reads []string) []string {
+	readsLookup := make(map[string]bool, len(reads))
+	for _, read := range reads {
+		readsLookup[read] = true
+	}
+	var intersection []string
+	for _, update := range updates {
+		if readsLookup[update.Name] {
+			intersection = append(intersection, update.Name)
+		}
+	}
+	return intersection
 }
 
 // subtract returns integers that are in first but not second array
