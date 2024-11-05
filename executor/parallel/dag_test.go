@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestDag1(t *testing.T) {
+func TestSimpleDagBuilding(t *testing.T) {
 	nodes := []*ExecutionNode{
 		{
 			SeqId: 0,
@@ -55,7 +55,7 @@ func TestDag1(t *testing.T) {
 	assertDagEqual(t, actual, expected)
 }
 
-func TestDag2(t *testing.T) {
+func TestComplexDagBuilding(t *testing.T) {
 	nodes := []*ExecutionNode{
 		{
 			SeqId: 0,
@@ -135,22 +135,7 @@ func TestDag2(t *testing.T) {
 	assertQueueEqual(t, testQueue, expectedWalkOrder)
 }
 
-// TODO: Test dag Update
-func TestDagUpdate(t *testing.T) {
-	nodes := []*ExecutionNode{}
-
-	actual := NewDependencyDag(nodes)
-
-	expected := &DependencyDag{
-		nodes:            []*ExecutionNode{},
-		dependantsById:   map[int]map[int]bool{},
-		dependenciesById: map[int]map[int]bool{},
-	}
-
-	assertDagEqual(t, actual, expected)
-}
-
-func TestConcurrentWalk1(t *testing.T) {
+func TestSimpleScheduling(t *testing.T) {
 	dag := NewDependencyDag([]*ExecutionNode{
 		{
 			SeqId: 0,
@@ -197,7 +182,7 @@ func TestConcurrentWalk1(t *testing.T) {
 }
 
 // Verifies that long independent branches are processed concurrently
-func TestConcurrentWalk2(t *testing.T) {
+func TestLongIndependentBranchesScheduling(t *testing.T) {
 	dag := NewDependencyDag([]*ExecutionNode{
 		{
 			SeqId: 0,

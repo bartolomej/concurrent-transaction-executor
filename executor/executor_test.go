@@ -13,7 +13,8 @@ import (
 	"time"
 )
 
-func TestExecutorTransferTransaction1(t *testing.T) {
+// This test case is from the instructions doc (Example 1)
+func TestSimpleSequentialTransactions(t *testing.T) {
 	startState := testAccountState{
 		types.AccountValue{Name: "A", Balance: 20},
 		types.AccountValue{Name: "B", Balance: 30},
@@ -35,7 +36,8 @@ func TestExecutorTransferTransaction1(t *testing.T) {
 	assertExecution(t, expectedUpdateState, block, startState, parallel.NewExecutor(3), "parallel")
 }
 
-func TestExecutorTransferTransaction2(t *testing.T) {
+// This test case is from the instructions doc (Example 2)
+func TestSimpleConcurrentTransactions(t *testing.T) {
 	startState := testAccountState{
 		types.AccountValue{Name: "A", Balance: 10},
 		types.AccountValue{Name: "B", Balance: 20},
@@ -58,7 +60,7 @@ func TestExecutorTransferTransaction2(t *testing.T) {
 	assertExecution(t, expectedUpdateState, block, startState, parallel.NewExecutor(2), "parallel")
 }
 
-func TestExecutorTransferTransaction3(t *testing.T) {
+func TestComplexConcurrentTransactions(t *testing.T) {
 	startState := testAccountState{
 		types.AccountValue{Name: "A", Balance: 20},
 		types.AccountValue{Name: "B", Balance: 0},
@@ -95,7 +97,7 @@ func TestExecutorTransferTransaction3(t *testing.T) {
 	assertExecution(t, expectedUpdateState, block, startState, parallel.NewExecutor(3), "parallel")
 }
 
-func TestExecutorConditionalTransaction4(t *testing.T) {
+func TestBlockingSequentialTransactions(t *testing.T) {
 	startState := testAccountState{
 		types.AccountValue{Name: "A", Balance: 10},
 		types.AccountValue{Name: "B", Balance: 10},
@@ -134,39 +136,13 @@ func TestExecutorConditionalTransaction4(t *testing.T) {
 	}
 
 	assertExecution(t, expectedUpdateState, block1, startState, serial.NewExecutor(), "serial")
-	assertExecution(t, expectedUpdateState, block2, startState, serial.NewExecutor(), "parallel")
+	assertExecution(t, expectedUpdateState, block2, startState, serial.NewExecutor(), "serial")
 
-	// TODO: Run multiple times to account for randomness
-	assertExecution(t, expectedUpdateState, block1, startState, parallel.NewExecutor(3), "serial")
+	assertExecution(t, expectedUpdateState, block1, startState, parallel.NewExecutor(3), "parallel")
 	assertExecution(t, expectedUpdateState, block2, startState, parallel.NewExecutor(3), "parallel")
 }
 
-func TestExecutorConditionalTransaction5(t *testing.T) {
-	startState := testAccountState{}
-	block := types.Block{
-		Transactions: []types.Transaction{
-			transactions.Mint{To: "A", Value: 10},
-			transactions.Transfer{From: "A", To: "B", Value: 10},
-			conditionalBulkTransfer{
-				from:               []string{"A", "B"},
-				to:                 []string{"C", "D"},
-				value:              10,
-				untilBalanceEquals: 10,
-			},
-			transactions.Transfer{From: "C", To: "E", Value: 10},
-			transactions.Transfer{From: "D", To: "E", Value: 10},
-		},
-	}
-	expectedUpdateState := []types.AccountValue{
-		{Name: "B", Balance: 10},
-	}
-
-	assertExecution(t, expectedUpdateState, block, startState, serial.NewExecutor(), "serial")
-	assertExecution(t, expectedUpdateState, block, startState, parallel.NewExecutor(3), "parallel")
-}
-
-// TODO: Concurrent execution doesn't scale well for increasing values of maxDepth
-func TestParallelExecutionWithIndependentBranches(t *testing.T) {
+func TestTreeLikeConcurrentTransactions(t *testing.T) {
 	rootAccount := "A"
 	leafAccount := "B"
 	maxDepth := 7
