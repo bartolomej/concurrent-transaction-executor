@@ -165,15 +165,6 @@ func (dag *dependencyDag) execute(state *accountDelta, nWorkers int) {
 				reExecutedNode := executeTransaction(state, node.seqId, *node.transaction)
 
 				diff := dag.update(reExecutedNode)
-				fmt.Printf("# node: %s\n", node.String())
-				fmt.Printf("# re-executed node: %s\n", reExecutedNode.String())
-				fmt.Printf("# diff: %s\n", diff.String())
-				fmt.Printf("# execution order: %v\n", executionOrder)
-				fmt.Printf("# execution queue: %v\n", queue.String())
-				fmt.Printf("# visited: %v\n", executor.visited)
-				fmt.Printf("# state: %s\n", state.String())
-				fmt.Println(dag.Graphviz(fmt.Sprintf("After_%d_iter_%d", reExecutedNode.seqId, iteration), fmt.Sprintf("%d", iteration), reExecutedNode.seqId))
-				fmt.Println()
 
 				// The new updates may affect new nodes in the DAG,
 				// so we must revert the state update and reprocess at a later point to compute the correct state updates.
@@ -199,7 +190,21 @@ func (dag *dependencyDag) execute(state *accountDelta, nWorkers int) {
 					// This node was moved to a different part of the DAG
 					// and should be processed again at a later point.
 					executor.markUnvisited(reExecutedNode.seqId)
+					for _, seqId := range diff.newDependencies {
+						executor.markUnvisited(seqId)
+					}
+					state.RevertUpdates(node.seqId, node.updates)
 				}
+
+				fmt.Printf("# node: %s\n", node.String())
+				fmt.Printf("# re-executed node: %s\n", reExecutedNode.String())
+				fmt.Printf("# diff: %s\n", diff.String())
+				fmt.Printf("# execution order: %v\n", executionOrder)
+				fmt.Printf("# execution queue: %v\n", queue.String())
+				fmt.Printf("# visited: %v\n", executor.visited)
+				fmt.Printf("# state: %s\n", state.String())
+				fmt.Println(dag.Graphviz(fmt.Sprintf("After_%d_iter_%d", reExecutedNode.seqId, iteration), fmt.Sprintf("%d", iteration), reExecutedNode.seqId))
+				fmt.Println()
 
 				iteration++
 				mu.Unlock()

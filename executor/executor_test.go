@@ -169,7 +169,7 @@ func TestExecutorConditionalTransaction5(t *testing.T) {
 func TestParallelExecutionWithIndependentBranches(t *testing.T) {
 	rootAccount := "A"
 	leafAccount := "B"
-	maxDepth := 2
+	maxDepth := 4
 	rootBalance := uint(math.Pow(2, float64(maxDepth)))
 
 	startState := testAccountState{
@@ -190,7 +190,6 @@ func TestParallelExecutionWithIndependentBranches(t *testing.T) {
 		{Name: leafAccount, Balance: rootBalance},
 	}
 
-	// TODO: Fix some nodes not executed
 	// Note: A noticeable perf improvement for parallel execution is only visible
 	// when transactions are doing more intensive work (e.g. loops with 1000+ iterations or I/O)
 	assertExecution(t, expectedUpdateState, block, startState, serial.NewExecutor(), "serial")

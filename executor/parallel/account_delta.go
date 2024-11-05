@@ -32,6 +32,12 @@ func (s *accountDelta) GetAccount(name string) api.AccountValue {
 }
 
 func (s *accountDelta) ApplyUpdates(seqId int, updates []api.AccountUpdate) {
+	if len(updates) == 0 {
+		return
+	}
+	if s.appliedUpdatesBySeqId[seqId] {
+		panic(fmt.Sprintf("updates were already applied for node %d", seqId))
+	}
 	for _, update := range updates {
 		s.write(update)
 	}
