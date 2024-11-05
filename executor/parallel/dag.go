@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"sync"
 )
 
 // DependencyDag is a Directed Acyclic Graph that is not necessarily connected.
@@ -152,12 +151,11 @@ func (dag *DependencyDag) Update(newNode *ExecutionNode) UpdateDiff {
 func (dag *DependencyDag) Execute(state *accountDelta, nWorkers int) {
 	queue := newChannelProcessingQueue()
 	executor := newDagExecutor(dag, queue)
-	var mu sync.Mutex
-	iteration := 1
 
 	for workerId := 0; workerId < nWorkers; workerId++ {
-		go func(mu *sync.Mutex, q <-chan processingTask) {
+		go func(q <-chan processingTask) {
 			for task := range q {
+				// TODO: Add mutex usage to fix concurrent execution
 				node := dag.Get(task.nodeSeqId)
 
 				// TODO(perf): Can we sometimes not Execute the node again (e.g. if it's the first Transaction)?
@@ -166,22 +164,6 @@ func (dag *DependencyDag) Execute(state *accountDelta, nWorkers int) {
 				reExecutedNode := executeTransaction(state, node.SeqId, *node.Transaction)
 
 				diff := dag.Update(reExecutedNode)
-
-				graphviz := Graphviz{
-					Name: fmt.Sprintf("Iteration_%d", iteration),
-					OutlinedNodes: map[int]bool{
-						reExecutedNode.SeqId: true,
-					},
-					NodeFillColor:    NewRgbColor(142, 202, 230),
-					NodeLabelColor:   NewRgbColor(2, 48, 71),
-					NodeOutlineColor: NewRgbColor(255, 183, 3),
-					EdgeLabelColor:   NewRgbColor(33, 158, 188),
-					EdgeFillColor:    NewRgbColor(2, 48, 71),
-					Dag:              dag,
-				}
-
-				fmt.Println(graphviz.Generate())
-				iteration++
 
 				// The new Updates may affect new nodes in the DAG,
 				// so we must revert the state Update and reprocess at a later point to compute the correct state Updates.
@@ -206,7 +188,7 @@ func (dag *DependencyDag) Execute(state *accountDelta, nWorkers int) {
 
 				task.done()
 			}
-		}(&mu, queue.tasks())
+		}(queue.tasks())
 	}
 
 	executor.execute()
