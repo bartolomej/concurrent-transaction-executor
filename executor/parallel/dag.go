@@ -3,6 +3,7 @@ package parallel
 import (
 	"blockchain/executor/api"
 	"fmt"
+	"math/rand"
 	"slices"
 	"strconv"
 	"strings"
@@ -114,6 +115,10 @@ type updateDiff struct {
 	newDependencies []int
 }
 
+func (d updateDiff) String() string {
+	return fmt.Sprintf("updateDiff{newDependants: %v, newDependencies: %v}", d.newDependants, d.newDependencies)
+}
+
 // update the DAG (if needed) with the re-executed execution node
 // returns the newly added dependencies/dependants for the new node
 func (dag *dependencyDag) update(newNode *executionNode) updateDiff {
@@ -143,11 +148,15 @@ func (dag *dependencyDag) execute(state *accountDelta, nWorkers int) {
 	queue := newChannelProcessingQueue()
 	executor := newDagExecutor(dag, queue)
 	var mu sync.Mutex
+	var iteration = 1
+	var executionOrder []int
 
-	for i := 0; i < nWorkers; i++ {
-		go func(workerId int, queue <-chan processingTask) {
-			for task := range queue {
+	for workerId := 0; workerId < nWorkers; workerId++ {
+		go func(mu *sync.Mutex, workerId int, q <-chan processingTask) {
+			for task := range q {
+				// TODO: Stop locking for the whole execution scope, but instead lock per state/dag update
 				mu.Lock()
+				executionOrder = append(executionOrder, task.nodeSeqId)
 				node := dag.lookup(task.nodeSeqId)
 
 				// TODO(perf): Can we sometimes not execute the node again (e.g. if it's the first transaction)?
@@ -155,7 +164,21 @@ func (dag *dependencyDag) execute(state *accountDelta, nWorkers int) {
 				// so we must always re-execute it to see if anything changed, until we traverse the graph fully.
 				reExecutedNode := executeTransaction(state, node.seqId, *node.transaction)
 
+				//isBadUpdate := len(dag.dependants(4)) == 2
+				//isBadUpdate := dag.dependenciesById[5][4] && dag.dependenciesById[6][4]
+				//isBadUpdate := strings.Contains(queue.String(), "[4,1]")
+				//isBadUpdate = isBadUpdate
+
 				diff := dag.update(reExecutedNode)
+				fmt.Printf("# node: %s\n", node.String())
+				fmt.Printf("# re-executed node: %s\n", reExecutedNode.String())
+				fmt.Printf("# diff: %s\n", diff.String())
+				fmt.Printf("# execution order: %v\n", executionOrder)
+				fmt.Printf("# execution queue: %v\n", queue.String())
+				fmt.Printf("# visited: %v\n", executor.visited)
+				//fmt.Printf("# execution queue: %v\n", executor.q)
+				fmt.Println(dag.Graphviz(fmt.Sprintf("After_%d_iter_%d", reExecutedNode.seqId, iteration), fmt.Sprintf("%d", iteration)))
+				fmt.Println()
 
 				// The new updates may affect new nodes in the DAG,
 				// so we must revert the state update and reprocess at a later point to compute the correct state updates.
@@ -183,24 +206,51 @@ func (dag *dependencyDag) execute(state *accountDelta, nWorkers int) {
 					executor.markUnvisited(reExecutedNode.seqId)
 				}
 
+				iteration++
 				mu.Unlock()
 				task.done()
 			}
-		}(i, queue.tasks())
+		}(&mu, workerId, queue.tasks())
 	}
 
 	executor.execute()
+
+	fmt.Printf("execution order: %v\n", executionOrder)
+	fmt.Println(queue.String())
 }
 
 // Graphviz outputs a graph in DOT graphing language.
 // See: https://graphviz.org/doc/info/lang.html
 // View online: https://dreampuf.github.io/GraphvizOnline
-func (dag *dependencyDag) Graphviz() string {
+func (dag *dependencyDag) Graphviz(graphName, nodePostfix string) string {
 	var sb strings.Builder
-	sb.WriteString("digraph TxDeps {\n")
+	sb.WriteString(fmt.Sprintf("subgraph %s {\n", graphName))
+
+	nodeName := func(seqId int) string {
+		return fmt.Sprintf("n_%d_%s", seqId, nodePostfix)
+	}
+	intToHex := func(num int) string {
+		hex := fmt.Sprintf("%x", num)
+		if len(hex) == 1 {
+			hex = "0" + hex
+		}
+		return hex
+	}
+	randomHexColor := func() string {
+		red := rand.Intn(255)
+		green := rand.Intn(255)
+		blue := rand.Intn(255)
+		return "#" + intToHex(red) + intToHex(green) + intToHex(blue)
+	}
+
+	sb.WriteString(fmt.Sprintf("\tnode [style=filled,color=\"%s\"];\n", randomHexColor()))
 	for _, node := range dag.nodes {
+		if len(dag.dependants(node.seqId)) == 0 && len(dag.dependencies(node.seqId)) == 0 {
+			sb.WriteString(fmt.Sprintf("\t%s;\n", nodeName(node.seqId)))
+			continue
+		}
 		for _, depSeqId := range dag.dependants(node.seqId) {
-			sb.WriteString(fmt.Sprintf("\t%d -> %d;\n", node.seqId, depSeqId))
+			sb.WriteString(fmt.Sprintf("\t%s -> %s;\n", nodeName(node.seqId), nodeName(depSeqId)))
 		}
 	}
 	sb.WriteString("}")
@@ -273,6 +323,7 @@ func (node *executionNode) String() string {
 // channelProcessingQueue is the default implementation of processingQueue using channels
 type channelProcessingQueue struct {
 	queue chan processingTask
+	log   [][]processingTask
 }
 
 func newChannelProcessingQueue() *channelProcessingQueue {
@@ -283,6 +334,7 @@ func (q *channelProcessingQueue) enqueue(units []processingTask) {
 	for _, unit := range units {
 		q.queue <- unit
 	}
+	q.log = append(q.log, units)
 }
 
 func (q *channelProcessingQueue) tasks() <-chan processingTask {
@@ -291,6 +343,28 @@ func (q *channelProcessingQueue) tasks() <-chan processingTask {
 
 func (q *channelProcessingQueue) close() {
 	close(q.queue)
+}
+
+func (q *channelProcessingQueue) String() string {
+	out := strings.Builder{}
+	out.WriteString("[")
+	for i, batch := range q.log {
+		out.WriteString("[")
+		for j, e := range batch {
+			out.WriteString(fmt.Sprintf("%d", e.nodeSeqId))
+			if j != len(batch)-1 {
+				out.WriteString(",")
+			} else {
+				out.WriteString("]")
+			}
+		}
+		if i != len(q.log)-1 {
+			out.WriteString(",")
+		} else {
+			out.WriteString("]")
+		}
+	}
+	return out.String()
 }
 
 // subtract returns integers that are in first but not second array

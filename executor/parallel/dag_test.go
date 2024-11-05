@@ -135,6 +135,20 @@ func TestDag2(t *testing.T) {
 	assertQueueEqual(t, testQueue, expectedWalkOrder)
 }
 
+func TestDagUpdate(t *testing.T) {
+	nodes := []*executionNode{}
+
+	actual := newDependencyDag(nodes)
+
+	expected := &dependencyDag{
+		nodes:            []*executionNode{},
+		dependantsById:   map[int]map[int]bool{},
+		dependenciesById: map[int]map[int]bool{},
+	}
+
+	assertDagEqual(t, actual, expected)
+}
+
 func TestConcurrentWalk1(t *testing.T) {
 	dag := newDependencyDag([]*executionNode{
 		{

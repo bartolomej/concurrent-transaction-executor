@@ -1,6 +1,9 @@
 package parallel
 
-import "sync"
+import (
+	"fmt"
+	"sync"
+)
 
 // dagExecutor handles topologically traversing the DAG and scheduling concurrent processing for independent set of nodes
 type dagExecutor struct {
@@ -39,9 +42,11 @@ func (e *dagExecutor) execute() {
 		for i := 0; i < n; i++ {
 			seqId := e.q[i]
 
-			// Dependencies changed since last processing, delay removal.
-			// Node will be processed again at some future point,
-			// since it now depends on some other node that has yet to be traversed.
+			// TODO: If seqId is one of the elements in the queue (e.g. added in one of the previous iterations of the inner loop),
+			// 	don't enqueue it's dependants because we first need to process the nodes leading up to seqId (it's dependencies changed)
+			// 	This condition is supposed to take care of that.
+			// Some dependencies were invalidated since last processing,
+			// so node must be reprocessed again at some future point.
 			if len(e.unvisitedDependencies(seqId)) > 0 {
 				continue
 			}
@@ -54,6 +59,8 @@ func (e *dagExecutor) execute() {
 					e.schedule(depSeqId)
 				}
 			}
+
+			fmt.Printf("# visit queue: %v (%d)\n", e.q, seqId)
 		}
 		e.q = e.q[n:]
 
