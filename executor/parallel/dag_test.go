@@ -124,7 +124,7 @@ func TestComplexDagBuilding(t *testing.T) {
 
 	testQueue := newTestDagQueue()
 	executor := newDagExecutor(actual, testQueue)
-	executor.execute()
+	executor.traverse()
 
 	expectedWalkOrder := [][]int{
 		{0},
@@ -170,7 +170,7 @@ func TestSimpleScheduling(t *testing.T) {
 
 	testQueue := newTestDagQueue()
 	executor := newDagExecutor(dag, testQueue)
-	executor.execute()
+	executor.traverse()
 
 	expected := [][]int{
 		{0, 1},
@@ -224,7 +224,7 @@ func TestLongIndependentBranchesScheduling(t *testing.T) {
 
 	testQueue := newTestDagQueue()
 	executor := newDagExecutor(dag, testQueue)
-	executor.execute()
+	executor.traverse()
 
 	expected := [][]int{
 		{0, 1},

@@ -20,9 +20,11 @@ func (e *Executor) Execute(block types.Block, state types.AccountState) ([]types
 	nodes := e.executeOptimistically(&txExecutor, block.Transactions, state)
 
 	dag := NewDependencyDag(nodes)
+	queue := newChannelProcessingQueue()
+	dagExecutor := newDagExecutor(dag, queue)
 	delta := newAccountDelta(state)
 
-	dag.Execute(&txExecutor, delta, e.nWorkers)
+	dagExecutor.execute(&txExecutor, delta, e.nWorkers)
 
 	return delta.UpdatedValues(), nil
 }

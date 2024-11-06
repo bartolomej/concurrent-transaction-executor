@@ -26,7 +26,68 @@ func newDagExecutor(dag *DependencyDag, queue processingQueue) dagExecutor {
 	}
 }
 
-func (e *dagExecutor) execute() {
+func (e *dagExecutor) execute(txExecutor *transactionExecutor, state *accountDelta, nWorkers int) {
+
+	for workerId := 0; workerId < nWorkers; workerId++ {
+		go func(q <-chan processingTask) {
+			for task := range q {
+				node := e.dag.Node(task.seqId)
+
+				if !task.isStale || len(node.Reads) == 0 {
+					state.ApplyUpdates(node.SeqId, node.Updates)
+					task.done()
+					return
+				}
+
+				reExecutedNode := txExecutor.execute(state, node.SeqId, *node.Transaction)
+
+				diff := e.dag.update(reExecutedNode)
+
+				// The new Updates may affect new nodes in the DAG,
+				// so we must revert the state update and reprocess at a later point to compute the correct state Updates.
+				// Invalidate entire descendants subgraph,
+				// because all the succeeding state Updates may be invalid as well.
+				e.dag.depthFirstSearch(diff.dependants.added, func(seqId int) bool {
+					state.RevertUpdates(seqId, e.dag.Node(seqId).Updates)
+					e.markUnvisited(seqId)
+
+					// TODO(perf): Stop descend if this node was previously unvisited
+					return true
+				})
+
+				e.dag.depthFirstSearch(diff.dependants.removed, func(seqId int) bool {
+					state.RevertUpdates(seqId, e.dag.Node(seqId).Updates)
+					e.markUnvisited(seqId)
+					// This node may not be reachable from the current subgraph,
+					// so we need a way to tell the e to re-execute it
+					// alongside re-scheduling its processing (marking it unvisited).
+					e.markStale(seqId)
+
+					// TODO(perf): Stop descend if this node was previously unvisited?
+					return true
+				})
+
+				if len(diff.dependencies.added) == 0 {
+					state.ApplyUpdates(reExecutedNode.SeqId, reExecutedNode.Updates)
+				} else {
+					// This node was moved to a different part of the DAG
+					// and should be processed again at a later point.
+					e.markUnvisited(reExecutedNode.SeqId)
+					for _, seqId := range diff.dependencies.added {
+						e.markUnvisited(seqId)
+					}
+					state.RevertUpdates(node.SeqId, node.Updates)
+				}
+
+				task.done()
+			}
+		}(e.processingQueue.tasks())
+	}
+
+	e.traverse()
+}
+
+func (e *dagExecutor) traverse() {
 
 	for seqId := range e.dag.nodes {
 		// Only traverse the clusters of dependent transactions.
@@ -157,4 +218,27 @@ type processingTask struct {
 type scheduledTask struct {
 	seqId   int
 	isStale bool
+}
+
+// channelProcessingQueue is the default implementation of processingQueue using channels
+type channelProcessingQueue struct {
+	queue chan processingTask
+}
+
+func newChannelProcessingQueue() *channelProcessingQueue {
+	return &channelProcessingQueue{queue: make(chan processingTask)}
+}
+
+func (q *channelProcessingQueue) enqueue(units []processingTask) {
+	for _, unit := range units {
+		q.queue <- unit
+	}
+}
+
+func (q *channelProcessingQueue) tasks() <-chan processingTask {
+	return q.queue
+}
+
+func (q *channelProcessingQueue) close() {
+	close(q.queue)
 }

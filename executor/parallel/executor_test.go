@@ -40,11 +40,11 @@ func TestRealWorldIndependentTransactions(t *testing.T) {
 	}
 
 	dag := NewDependencyDag(nodes)
-
-	fmt.Println(dag.Graphviz())
+	queue := newChannelProcessingQueue()
+	dagExecutor := newDagExecutor(dag, queue)
 
 	delta := newAccountDelta(startState)
-	dag.Execute(&txExecutor, delta, executor.nWorkers)
+	dagExecutor.execute(&txExecutor, delta, executor.nWorkers)
 	fmt.Println(dag.Graphviz())
 
 	assertExecutionCountEqual(t, &txExecutor, 0, 1)

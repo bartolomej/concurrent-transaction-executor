@@ -195,74 +195,16 @@ func (dag *DependencyDag) update(newNode *ExecutionNode) updateDiff {
 	}
 }
 
-func (dag *DependencyDag) Execute(txExecutor *transactionExecutor, state *accountDelta, nWorkers int) {
-	queue := newChannelProcessingQueue()
-	executor := newDagExecutor(dag, queue)
-
-	for workerId := 0; workerId < nWorkers; workerId++ {
-		go func(q <-chan processingTask) {
-			for task := range q {
-				node := dag.Node(task.seqId)
-
-				if !task.isStale || len(node.Reads) == 0 {
-					state.ApplyUpdates(node.SeqId, node.Updates)
-					task.done()
-					return
-				}
-
-				reExecutedNode := txExecutor.execute(state, node.SeqId, *node.Transaction)
-
-				diff := dag.update(reExecutedNode)
-
-				// The new Updates may affect new nodes in the DAG,
-				// so we must revert the state update and reprocess at a later point to compute the correct state Updates.
-				// Invalidate entire descendants subgraph,
-				// because all the succeeding state Updates may be invalid as well.
-				dag.depthFirstSearch(diff.dependants.added, func(seqId int) {
-					state.RevertUpdates(seqId, dag.Node(seqId).Updates)
-					executor.markUnvisited(seqId)
-				})
-
-				dag.depthFirstSearch(diff.dependants.removed, func(seqId int) {
-					state.RevertUpdates(seqId, dag.Node(seqId).Updates)
-					executor.markUnvisited(seqId)
-					// This node may not be reachable from the current subgraph,
-					// so we need a way to tell the executor to re-execute it
-					// alongside re-scheduling its processing (marking it unvisited).
-					executor.markStale(seqId)
-				})
-
-				if len(diff.dependencies.added) == 0 {
-					state.ApplyUpdates(reExecutedNode.SeqId, reExecutedNode.Updates)
-				} else {
-					// This node was moved to a different part of the DAG
-					// and should be processed again at a later point.
-					executor.markUnvisited(reExecutedNode.SeqId)
-					for _, seqId := range diff.dependencies.added {
-						executor.markUnvisited(seqId)
-					}
-					state.RevertUpdates(node.SeqId, node.Updates)
-				}
-
-				task.done()
-			}
-		}(queue.tasks())
-	}
-
-	executor.execute()
-}
-
-func (dag *DependencyDag) depthFirstSearch(fromSeqIds []int, callback func(int)) {
+func (dag *DependencyDag) depthFirstSearch(fromSeqIds []int, shouldDescend func(int) bool) {
 	q := make([]int, 0)
 	q = append(q, fromSeqIds...)
 	for len(q) > 0 {
 		seqId := q[0]
 		q = q[1:]
 
-		callback(seqId)
-
-		// TODO(perf): Only push the ones that weren't visited yet for the invalidation traversal
-		q = append(q, dag.Dependants(seqId)...)
+		if shouldDescend(seqId) {
+			q = append(q, dag.Dependants(seqId)...)
+		}
 	}
 }
 
@@ -308,53 +250,6 @@ func (dag *DependencyDag) String() string {
 	}
 
 	return sb.String()
-}
-
-// channelProcessingQueue is the default implementation of processingQueue using channels
-type channelProcessingQueue struct {
-	queue chan processingTask
-	log   [][]processingTask
-}
-
-func newChannelProcessingQueue() *channelProcessingQueue {
-	return &channelProcessingQueue{queue: make(chan processingTask)}
-}
-
-func (q *channelProcessingQueue) enqueue(units []processingTask) {
-	for _, unit := range units {
-		q.queue <- unit
-	}
-	q.log = append(q.log, units)
-}
-
-func (q *channelProcessingQueue) tasks() <-chan processingTask {
-	return q.queue
-}
-
-func (q *channelProcessingQueue) close() {
-	close(q.queue)
-}
-
-func (q *channelProcessingQueue) String() string {
-	out := strings.Builder{}
-	out.WriteString("[")
-	for i, batch := range q.log {
-		out.WriteString("[")
-		for j, e := range batch {
-			out.WriteString(fmt.Sprintf("%d", e.seqId))
-			if j != len(batch)-1 {
-				out.WriteString(",")
-			} else {
-				out.WriteString("]")
-			}
-		}
-		if i != len(q.log)-1 {
-			out.WriteString(",")
-		} else {
-			out.WriteString("]")
-		}
-	}
-	return out.String()
 }
 
 func sortNodesBySeqId(nodes []*ExecutionNode) {
