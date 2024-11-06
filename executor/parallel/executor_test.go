@@ -3,7 +3,6 @@ package parallel
 import (
 	"blockchain/executor/types"
 	"blockchain/transactions"
-	"fmt"
 	"testing"
 )
 
@@ -45,7 +44,6 @@ func TestReExecutions_DependencyAddition_IndependentNodes(t *testing.T) {
 
 	delta := newAccountDelta(startState)
 	dagExecutor.execute(&txExecutor, delta, executor.nWorkers)
-	fmt.Println(dag.Graphviz())
 
 	assertExecutionCountEqual(t, &txExecutor, 0, 1)
 	// Tx 1 has no inputs, so no other transaction can affect it's output.

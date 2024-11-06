@@ -19,14 +19,9 @@ type Graphviz struct {
 	NodeLabelColor   Color
 	EdgeLabelColor   Color
 	EdgeFillColor    Color
-	Dag              *DependencyDag
 }
 
-func (g *Graphviz) String() string {
-	return g.Generate()
-}
-
-func (g *Graphviz) Generate() string {
+func (g *Graphviz) Generate(dag *DependencyDag) string {
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("digraph %s {\n", g.Name))
@@ -36,13 +31,13 @@ func (g *Graphviz) Generate() string {
 		g.NodeLabelColor,
 	))
 
-	for _, seqId := range g.Dag.NodeIds() {
-		node := g.Dag.Node(seqId)
-		if len(g.Dag.Dependants(seqId)) == 0 && len(g.Dag.Dependencies(seqId)) == 0 {
+	for _, seqId := range dag.NodeIds() {
+		node := dag.Node(seqId)
+		if len(dag.Dependants(seqId)) == 0 && len(dag.Dependencies(seqId)) == 0 {
 			sb.WriteString(fmt.Sprintf("\t%s;\n", g.nodeName(seqId)))
 		}
-		for _, depSeqId := range g.Dag.Dependants(seqId) {
-			depNode := g.Dag.Node(depSeqId)
+		for _, depSeqId := range dag.Dependants(seqId) {
+			depNode := dag.Node(depSeqId)
 			sb.WriteString(fmt.Sprintf("\t%s -> %s ", g.nodeName(seqId), g.nodeName(depSeqId)))
 			sb.WriteString(fmt.Sprintf(
 				"[label=\"%s\", fontsize=8, fontcolor=\"%s\", color=\"%s\"];\n",

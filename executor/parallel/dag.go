@@ -217,9 +217,8 @@ func (dag *DependencyDag) Graphviz() string {
 		NodeOutlineColor: NewRgbColor(255, 183, 3),
 		EdgeLabelColor:   NewRgbColor(33, 158, 188),
 		EdgeFillColor:    NewRgbColor(2, 48, 71),
-		Dag:              dag,
 	}
-	return graphViz.Generate()
+	return graphViz.Generate(dag)
 }
 
 func (dag *DependencyDag) String() string {
