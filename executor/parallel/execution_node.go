@@ -8,6 +8,15 @@ import (
 	"strings"
 )
 
+type transactionExecutor struct {
+	// executionCount tracks the total execution count for every transaction by seq ID
+	executionCount []int
+}
+
+func newTransactionExecutor(transactionCount int) transactionExecutor {
+	return transactionExecutor{executionCount: make([]int, transactionCount)}
+}
+
 type ExecutionNode struct {
 	// SeqId is a unique identifier that also indicates the Transaction order within a block
 	SeqId int
@@ -21,10 +30,12 @@ type ExecutionNode struct {
 	Transaction *types.Transaction
 }
 
-// executeTransaction executes the given Transaction and creates an execution node with the necessary runtime info
-func executeTransaction(state types.AccountState, seqId int, transaction types.Transaction) *ExecutionNode {
+// execute executes the given Transaction and creates an execution node with the necessary runtime info
+func (e *transactionExecutor) execute(state types.AccountState, seqId int, transaction types.Transaction) *ExecutionNode {
 	proxy := stateProxy{readsLookup: make(map[string]bool), state: state}
 	updates, err := transaction.Updates(&proxy)
+
+	e.executionCount[seqId]++
 
 	return &ExecutionNode{
 		SeqId:       seqId,

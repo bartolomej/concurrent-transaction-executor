@@ -164,7 +164,7 @@ func (dag *DependencyDag) update(newNode *ExecutionNode) UpdateDiff {
 	}
 }
 
-func (dag *DependencyDag) Execute(state *accountDelta, nWorkers int) {
+func (dag *DependencyDag) Execute(txExecutor *transactionExecutor, state *accountDelta, nWorkers int) {
 	queue := newChannelProcessingQueue()
 	executor := newDagExecutor(dag, queue)
 
@@ -176,7 +176,20 @@ func (dag *DependencyDag) Execute(state *accountDelta, nWorkers int) {
 				// TODO(perf): Can we sometimes not Execute the node again (e.g. if it's the first Transaction)?
 				// We don't know if a Transaction was executed in the correct order,
 				// so we must always re-Execute it to see if anything changed, until we traverse the graph fully.
-				reExecutedNode := executeTransaction(state, node.SeqId, *node.Transaction)
+
+				//if len(node.Reads) == 0 {
+				//	state.ApplyUpdates(node.SeqId, node.Updates)
+				//	task.done()
+				//	return
+				//}
+
+				if len(dag.Dependencies(node.SeqId)) == 0 || len(node.Reads) == 0 {
+					state.ApplyUpdates(node.SeqId, node.Updates)
+					task.done()
+					return
+				}
+
+				reExecutedNode := txExecutor.execute(state, node.SeqId, *node.Transaction)
 
 				diff := dag.update(reExecutedNode)
 
@@ -221,6 +234,20 @@ func (dag *DependencyDag) depthFirstSearch(fromSeqIds []int, callback func(int))
 		// TODO(perf): Only push the ones that weren't visited yet for the invalidation traversal
 		q = append(q, dag.Dependants(seqId)...)
 	}
+}
+
+func (dag *DependencyDag) Graphviz() string {
+	graphViz := Graphviz{
+		Name:             "DependencyGraph",
+		OutlinedNodes:    map[int]bool{},
+		NodeFillColor:    NewRgbColor(142, 202, 230),
+		NodeLabelColor:   NewRgbColor(2, 48, 71),
+		NodeOutlineColor: NewRgbColor(255, 183, 3),
+		EdgeLabelColor:   NewRgbColor(33, 158, 188),
+		EdgeFillColor:    NewRgbColor(2, 48, 71),
+		Dag:              dag,
+	}
+	return graphViz.Generate()
 }
 
 func (dag *DependencyDag) String() string {

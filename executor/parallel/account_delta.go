@@ -2,7 +2,9 @@ package parallel
 
 import (
 	"blockchain/executor/types"
+	"cmp"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -91,19 +93,16 @@ func (s *accountDelta) UpdatedValues() []types.AccountValue {
 }
 
 func (s *accountDelta) String() string {
-	serUpdatedState := make([]string, 0, len(s.updatedBalances))
-	for name, balance := range s.updatedBalances {
-		serUpdatedState = append(serUpdatedState, fmt.Sprintf("(%s, %d)", name, balance))
+	updatedState := s.UpdatedValues()
+	slices.SortFunc(updatedState, func(a, b types.AccountValue) int {
+		return cmp.Compare(a.Name, b.Name)
+	})
+
+	serUpdatedState := make([]string, 0, len(updatedState))
+
+	for _, updated := range updatedState {
+		serUpdatedState = append(serUpdatedState, fmt.Sprintf("(%s, %d)", updated.Name, updated.Balance))
 	}
-	serSeqIds := make([]string, 0, len(s.appliedUpdatesBySeqId))
-	for seqId, isApplied := range s.appliedUpdatesBySeqId {
-		if isApplied {
-			serSeqIds = append(serSeqIds, fmt.Sprintf("%d", seqId))
-		}
-	}
-	return fmt.Sprintf(
-		"accountDelta{updatedState: %s, updatesFrom: %s}",
-		strings.Join(serUpdatedState, ", "),
-		strings.Join(serSeqIds, ", "),
-	)
+
+	return fmt.Sprintf("[%s]", strings.Join(serUpdatedState, ", "))
 }

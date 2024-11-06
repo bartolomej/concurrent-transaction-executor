@@ -16,17 +16,22 @@ func NewExecutor(nWorkers int) *Executor {
 }
 
 func (e *Executor) Execute(block types.Block, state types.AccountState) ([]types.AccountValue, error) {
-	nodes := e.executeOptimistically(block.Transactions, state)
+	txExecutor := newTransactionExecutor(len(block.Transactions))
+	nodes := e.executeOptimistically(&txExecutor, block.Transactions, state)
 
 	dag := NewDependencyDag(nodes)
 	delta := newAccountDelta(state)
 
-	dag.Execute(delta, e.nWorkers)
+	dag.Execute(&txExecutor, delta, e.nWorkers)
 
 	return delta.UpdatedValues(), nil
 }
 
-func (e *Executor) executeOptimistically(transactions []types.Transaction, state types.AccountState) []*ExecutionNode {
+func (e *Executor) executeOptimistically(
+	txExecutor *transactionExecutor,
+	transactions []types.Transaction,
+	state types.AccountState,
+) []*ExecutionNode {
 	nTx := len(transactions)
 	nodeBatches := make([][]*ExecutionNode, e.nWorkers)
 
@@ -43,7 +48,7 @@ func (e *Executor) executeOptimistically(transactions []types.Transaction, state
 		go func(workerId, startSeqId, endSeqId int, wg *sync.WaitGroup) {
 			nodeBatch := make([]*ExecutionNode, 0, endSeqId-startSeqId)
 			for seqId := startSeqId; seqId < endSeqId; seqId++ {
-				nodeBatch = append(nodeBatch, executeTransaction(state, seqId, transactions[seqId]))
+				nodeBatch = append(nodeBatch, txExecutor.execute(state, seqId, transactions[seqId]))
 			}
 			nodeBatches[workerId] = nodeBatch
 			wg.Done()

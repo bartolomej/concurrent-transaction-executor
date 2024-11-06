@@ -27,7 +27,11 @@ func newDagExecutor(dag *DependencyDag, queue processingQueue) dagExecutor {
 func (e *dagExecutor) execute() {
 
 	for seqId := range e.dag.nodes {
-		if len(e.dag.Dependencies(seqId)) == 0 {
+		// Only traverse the clusters of dependent transactions.
+		// This will delay the execution of (initially) independent transactions
+		// until (if) they are discovered to be part of one of the clusters.
+		// This will minimize the re-execution times.
+		if len(e.dag.Dependencies(seqId)) == 0 && len(e.dag.Dependants(seqId)) > 0 {
 			e.schedule(seqId)
 		}
 	}
@@ -63,6 +67,15 @@ func (e *dagExecutor) execute() {
 
 		e.awaitProcessing()
 	}
+
+	// Process leftover independent nodes that were not part of any dependency clusters.
+	for seqId := range e.dag.nodes {
+		if !e.visited[seqId] {
+			e.schedule(seqId)
+		}
+	}
+
+	e.awaitProcessing()
 
 	e.processingQueue.close()
 }
