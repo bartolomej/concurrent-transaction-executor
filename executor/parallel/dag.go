@@ -89,6 +89,9 @@ func (dag *DependencyDag) computeEdges() {
 }
 
 func (dag *DependencyDag) NodeIds() []int {
+	dag.mu.RLock()
+	defer dag.mu.RUnlock()
+
 	result := make([]int, 0, len(dag.nodes))
 	for _, node := range dag.nodes {
 		result = append(result, node.SeqId)
