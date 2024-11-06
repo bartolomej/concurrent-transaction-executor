@@ -44,7 +44,8 @@ func TestRealWorldIndependentTransactions(t *testing.T) {
 	fmt.Println(dag.Graphviz())
 
 	assertExecutionCountEqual(t, &txExecutor, 0, 1)
-	assertExecutionCountEqual(t, &txExecutor, 1, 2)
+	// Tx 1 has no inputs, so no other transaction can affect it's output.
+	assertExecutionCountEqual(t, &txExecutor, 1, 1)
 	assertExecutionCountEqual(t, &txExecutor, 2, 2)
 	assertExecutionCountEqual(t, &txExecutor, 3, 1)
 	assertExecutionCountEqual(t, &txExecutor, 4, 1)

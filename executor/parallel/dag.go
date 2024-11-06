@@ -204,7 +204,7 @@ func (dag *DependencyDag) Execute(txExecutor *transactionExecutor, state *accoun
 			for task := range q {
 				node := dag.Node(task.seqId)
 
-				if !task.isStale {
+				if !task.isStale || len(node.Reads) == 0 {
 					state.ApplyUpdates(node.SeqId, node.Updates)
 					task.done()
 					return
