@@ -76,9 +76,12 @@ func TestComplexConcurrentTransactions(t *testing.T) {
 			transactions.Transfer{From: "A", To: "C", Value: 10},
 			// At initial execution, this will produce no updates due to "insufficient balance" error
 			transactions.Transfer{From: "B", To: "D", Value: 10},
-			// After initial execution, this will be incorrectly executed before the above tx
+			// This transaction execution should be delayed and processed only when the above transaction emits outputs
 			transactions.Transfer{From: "D", To: "E", Value: 10},
-			// After initial execution, this will be incorrectly executed (will perform a transfer, when it shouldn't),
+			// After initial execution the next 3 transactions
+			// will be incorrectly executed (will perform a transfer, when they shouldn't).
+			// The state updates they produce must be reverted
+			// and replaced with the correct state updates after the second execution.
 			conditionalBulkTransfer{
 				from:               []string{"E"},
 				to:                 []string{"F"},
@@ -86,6 +89,7 @@ func TestComplexConcurrentTransactions(t *testing.T) {
 				untilBalanceEquals: 10,
 			},
 			transactions.Transfer{From: "F", To: "G", Value: 10},
+			transactions.Transfer{From: "G", To: "H", Value: 10},
 		},
 	}
 	expectedUpdateState := []types.AccountValue{

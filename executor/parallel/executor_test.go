@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestRealWorldIndependentTransactions(t *testing.T) {
+func TestReExecutions_DependencyAddition_IndependentNodes(t *testing.T) {
 	startState := testAccountState{
 		types.AccountValue{Name: "A", Balance: 10},
 		types.AccountValue{Name: "E", Balance: 10},
@@ -20,8 +20,8 @@ func TestRealWorldIndependentTransactions(t *testing.T) {
 			transactions.Transfer{From: "A", To: "B", Value: 10},
 			transactions.Mint{To: "A", Value: 20},
 			transactions.Transfer{From: "A", To: "C", Value: 20},
-			// This will first be treated as independent,
-			// but will be correctly moved to the dependency subgraph
+			// This transaction will first be treated as independent,
+			// but should be moved to the dependency subgraph
 			// after the above transaction is re-executed.
 			transactions.Transfer{From: "C", To: "D", Value: 20},
 			// Next 3 transactions are independent

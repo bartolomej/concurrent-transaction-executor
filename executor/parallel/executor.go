@@ -2,6 +2,7 @@ package parallel
 
 import (
 	"blockchain/executor/types"
+	"fmt"
 	"sync"
 )
 
@@ -22,9 +23,12 @@ func (e *Executor) Execute(block types.Block, state types.AccountState) ([]types
 	dag := NewDependencyDag(nodes)
 	queue := newChannelProcessingQueue()
 	dagExecutor := newDagExecutor(dag, queue)
-	delta := newAccountDelta(state)
 
+	fmt.Println(dag.Graphviz())
+
+	delta := newAccountDelta(state)
 	dagExecutor.execute(&txExecutor, delta, e.nWorkers)
+	fmt.Println(dag.Graphviz())
 
 	return delta.UpdatedValues(), nil
 }

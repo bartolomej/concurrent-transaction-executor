@@ -12,9 +12,10 @@ type dagExecutor struct {
 	processingQueue processingQueue
 	wg              sync.WaitGroup
 	mu              sync.Mutex
-	visited         []bool
-	stale           []bool
-	dag             *DependencyDag
+	// visited tracks
+	visited []bool
+	stale   []bool
+	dag     *DependencyDag
 }
 
 func newDagExecutor(dag *DependencyDag, queue processingQueue) dagExecutor {
