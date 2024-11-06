@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 )
 
 // DependencyDag is a Directed Acyclic Graph that is not necessarily connected.
@@ -13,6 +14,7 @@ type DependencyDag struct {
 	dependantsById map[int]map[int]bool
 	// dependenciesById tracks a list of dependency nodes for every node ID
 	dependenciesById map[int]map[int]bool
+	mu               sync.RWMutex
 }
 
 // NewDependencyDag computes a dependency DAG given nodes
@@ -86,7 +88,7 @@ func (dag *DependencyDag) computeEdges() {
 	}
 }
 
-func (dag *DependencyDag) NodeSeqIds() []int {
+func (dag *DependencyDag) NodeIds() []int {
 	result := make([]int, 0, len(dag.nodes))
 	for _, node := range dag.nodes {
 		result = append(result, node.SeqId)
@@ -94,11 +96,17 @@ func (dag *DependencyDag) NodeSeqIds() []int {
 	return result
 }
 
-func (dag *DependencyDag) Get(seqId int) *ExecutionNode {
+func (dag *DependencyDag) Node(seqId int) *ExecutionNode {
+	dag.mu.RLock()
+	defer dag.mu.RUnlock()
+
 	return dag.nodes[seqId]
 }
 
 func (dag *DependencyDag) Dependants(seqId int) []int {
+	dag.mu.RLock()
+	defer dag.mu.RUnlock()
+
 	var seqIds []int
 	for id := range dag.dependantsById[seqId] {
 		seqIds = append(seqIds, id)
@@ -107,6 +115,9 @@ func (dag *DependencyDag) Dependants(seqId int) []int {
 }
 
 func (dag *DependencyDag) Dependencies(seqId int) []int {
+	dag.mu.RLock()
+	defer dag.mu.RUnlock()
+
 	var seqIds []int
 	for id := range dag.dependenciesById[seqId] {
 		seqIds = append(seqIds, id)
@@ -123,21 +134,23 @@ func (d UpdateDiff) String() string {
 	return fmt.Sprintf("UpdateDiff{newDependants: %v, newDependencies: %v}", d.newDependants, d.newDependencies)
 }
 
-// Update the DAG (if needed) with the re-executed execution node
+// update the DAG (if needed) with the re-executed execution node
 // returns the newly added Dependencies/Dependants for the new node
-func (dag *DependencyDag) Update(newNode *ExecutionNode) UpdateDiff {
+func (dag *DependencyDag) update(newNode *ExecutionNode) UpdateDiff {
 	oldNode := dag.nodes[newNode.SeqId]
 
 	if oldNode == nil {
-		panic(fmt.Sprintf("cannot call Update for new node with SeqId %d", newNode.SeqId))
+		panic(fmt.Sprintf("cannot call update for new node with SeqId %d", newNode.SeqId))
 	}
 
 	beforeDependants := dag.Dependants(newNode.SeqId)
 	beforeDependencies := dag.Dependencies(newNode.SeqId)
 
-	// TODO(perf): Incrementally (without rebuilding the whole graph) compute edges?
+	dag.mu.Lock()
 	dag.nodes[newNode.SeqId] = newNode
+	// TODO(perf): Incrementally (without rebuilding the whole graph) compute edges?
 	dag.computeEdges()
+	dag.mu.Unlock()
 
 	afterDependants := dag.Dependants(newNode.SeqId)
 	afterDependencies := dag.Dependencies(newNode.SeqId)
@@ -155,22 +168,21 @@ func (dag *DependencyDag) Execute(state *accountDelta, nWorkers int) {
 	for workerId := 0; workerId < nWorkers; workerId++ {
 		go func(q <-chan processingTask) {
 			for task := range q {
-				// TODO: Add mutex usage to fix concurrent execution
-				node := dag.Get(task.nodeSeqId)
+				node := dag.Node(task.nodeSeqId)
 
 				// TODO(perf): Can we sometimes not Execute the node again (e.g. if it's the first Transaction)?
 				// We don't know if a Transaction was executed in the correct order,
 				// so we must always re-Execute it to see if anything changed, until we traverse the graph fully.
 				reExecutedNode := executeTransaction(state, node.SeqId, *node.Transaction)
 
-				diff := dag.Update(reExecutedNode)
+				diff := dag.update(reExecutedNode)
 
 				// The new Updates may affect new nodes in the DAG,
-				// so we must revert the state Update and reprocess at a later point to compute the correct state Updates.
+				// so we must revert the state update and reprocess at a later point to compute the correct state Updates.
 				// Invalidate entire descendants subgraph,
 				// because all the succeeding state Updates may be invalid as well.
 				dag.depthFirstSearch(diff.newDependants, func(seqId int) {
-					state.RevertUpdates(seqId, dag.Get(seqId).Updates)
+					state.RevertUpdates(seqId, dag.Node(seqId).Updates)
 					executor.markUnvisited(seqId)
 				})
 
@@ -221,14 +233,14 @@ func (dag *DependencyDag) String() string {
 		sb.WriteString(fmt.Sprintf("- %s\n", node.String()))
 	}
 
-	sb.WriteString("Dependencies:\n")
+	sb.WriteString("dependencies:\n")
 	for _, node := range sortedNodes {
 		d := dag.Dependencies(node.SeqId)
 		slices.Sort(d)
 		sb.WriteString(fmt.Sprintf("%d -> %v\n", node.SeqId, d))
 	}
 
-	sb.WriteString("Dependants:\n")
+	sb.WriteString("dependants:\n")
 	for _, node := range sortedNodes {
 		d := dag.Dependants(node.SeqId)
 		slices.Sort(d)

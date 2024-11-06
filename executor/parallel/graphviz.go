@@ -36,13 +36,13 @@ func (g *Graphviz) Generate() string {
 		g.NodeLabelColor,
 	))
 
-	for _, seqId := range g.Dag.NodeSeqIds() {
-		node := g.Dag.Get(seqId)
+	for _, seqId := range g.Dag.NodeIds() {
+		node := g.Dag.Node(seqId)
 		if len(g.Dag.Dependants(seqId)) == 0 && len(g.Dag.Dependencies(seqId)) == 0 {
 			sb.WriteString(fmt.Sprintf("\t%s;\n", g.nodeName(seqId)))
 		}
 		for _, depSeqId := range g.Dag.Dependants(seqId) {
-			depNode := g.Dag.Get(depSeqId)
+			depNode := g.Dag.Node(depSeqId)
 			sb.WriteString(fmt.Sprintf("\t%s -> %s ", g.nodeName(seqId), g.nodeName(depSeqId)))
 			sb.WriteString(fmt.Sprintf(
 				"[label=\"%s\", fontsize=8, fontcolor=\"%s\", color=\"%s\"];\n",

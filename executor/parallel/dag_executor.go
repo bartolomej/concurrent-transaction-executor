@@ -6,14 +6,14 @@ import (
 
 // dagExecutor handles topologically traversing the DAG and scheduling concurrent processing for independent set of nodes
 type dagExecutor struct {
-	// nodes in q were already processed
+	// nodes in scheduledQueue were already processed
 	// and are waiting to be traversed to enqueue their Dependants
-	q               []int
+	scheduledQueue  []int
+	processingQueue processingQueue
 	wg              sync.WaitGroup
-	currBatch       []processingTask
+	mu              sync.Mutex
 	visited         []bool
 	dag             *DependencyDag
-	processingQueue processingQueue
 }
 
 func newDagExecutor(dag *DependencyDag, queue processingQueue) dagExecutor {
@@ -34,11 +34,11 @@ func (e *dagExecutor) execute() {
 
 	e.awaitProcessing()
 
-	for len(e.q) > 0 {
+	for len(e.scheduledQueue) > 0 {
 
-		n := len(e.q)
+		n := len(e.scheduledQueue)
 		for i := 0; i < n; i++ {
-			seqId := e.q[i]
+			seqId := e.scheduledQueue[i]
 
 			// Stop with further sub-graph traversal from the current node,
 			// because the current node has new Dependencies,
@@ -59,7 +59,7 @@ func (e *dagExecutor) execute() {
 				}
 			}
 		}
-		e.q = e.q[n:]
+		e.scheduledQueue = e.scheduledQueue[n:]
 
 		e.awaitProcessing()
 	}
@@ -88,25 +88,39 @@ func (e *dagExecutor) unvisitedDependants(seqId int) []int {
 }
 
 func (e *dagExecutor) schedule(seqId int) {
-	e.wg.Add(1)
-	e.currBatch = append(e.currBatch, processingTask{
-		nodeSeqId: seqId,
-		done: func() {
-			e.wg.Done()
-		},
-	})
-	e.q = append(e.q, seqId)
+	e.scheduledQueue = append(e.scheduledQueue, seqId)
+}
+
+func (e *dagExecutor) isScheduled(seqId int) bool {
+	for _, scheduledSeqId := range e.scheduledQueue {
+		if scheduledSeqId == seqId {
+			return true
+		}
+	}
+	return false
 }
 
 // Can be called concurrently for different SeqId values
 func (e *dagExecutor) markUnvisited(seqId int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
 	e.visited[seqId] = false
 }
 
 func (e *dagExecutor) awaitProcessing() {
-	if len(e.currBatch) > 0 {
-		e.processingQueue.enqueue(e.currBatch)
-		e.currBatch = make([]processingTask, 0)
+	if len(e.scheduledQueue) > 0 {
+		currBatch := make([]processingTask, 0, len(e.scheduledQueue))
+		for _, seqId := range e.scheduledQueue {
+			currBatch = append(currBatch, processingTask{
+				nodeSeqId: seqId,
+				done: func() {
+					e.wg.Done()
+				},
+			})
+		}
+		e.wg.Add(len(currBatch))
+		e.processingQueue.enqueue(currBatch)
 		e.wg.Wait()
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"blockchain/executor/types"
 	"fmt"
 	"strings"
+	"sync"
 )
 
 // accountDelta keeps track of the updated state and supports writing and reverting state changes
@@ -11,6 +12,7 @@ type accountDelta struct {
 	updatedBalances       map[string]int
 	oldState              types.AccountState
 	appliedUpdatesBySeqId map[int]bool
+	mu                    sync.RWMutex
 }
 
 func newAccountDelta(oldState types.AccountState) *accountDelta {
@@ -22,6 +24,8 @@ func newAccountDelta(oldState types.AccountState) *accountDelta {
 }
 
 func (s *accountDelta) Get(name string) types.AccountValue {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if balance, ok := s.updatedBalances[name]; ok {
 		return types.AccountValue{
 			Name:    name,
@@ -36,8 +40,10 @@ func (s *accountDelta) ApplyUpdates(seqId int, updates []types.AccountUpdate) {
 	if len(updates) == 0 {
 		return
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.appliedUpdatesBySeqId[seqId] {
-		panic(fmt.Sprintf("Updates were already applied for node %d", seqId))
+		panic(fmt.Sprintf("updates were already applied for node %d", seqId))
 	}
 	for _, update := range updates {
 		s.write(update)
@@ -46,6 +52,8 @@ func (s *accountDelta) ApplyUpdates(seqId int, updates []types.AccountUpdate) {
 }
 
 func (s *accountDelta) RevertUpdates(seqId int, updates []types.AccountUpdate) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if !s.appliedUpdatesBySeqId[seqId] {
 		return
 	}
