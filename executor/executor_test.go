@@ -301,10 +301,11 @@ func assertExecution(
 	if len(expectedUpdatedState) != len(actualUpdatedState) {
 
 		t.Fatalf(
-			"expected %d updates, but got %d:\n%s",
+			"expected %d updates, but got %d:\nexpected: %v\nactual: %v",
 			len(expectedUpdatedState),
 			len(actualUpdatedState),
-			formatValues(actualUpdatedState),
+			formatStateUpdates(expectedUpdatedState),
+			formatStateUpdates(actualUpdatedState),
 		)
 	}
 
@@ -319,7 +320,7 @@ func assertExecution(
 	}
 }
 
-func formatValues(values []types.AccountValue) string {
+func formatStateUpdates(values []types.AccountValue) string {
 	var serUpdates []string
 	for _, v := range values {
 		serUpdates = append(serUpdates, fmt.Sprintf("[%s, %d]", v.Name, v.Balance))

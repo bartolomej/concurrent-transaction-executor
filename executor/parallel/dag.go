@@ -128,18 +128,49 @@ func (dag *DependencyDag) Dependencies(seqId int) []int {
 	return seqIds
 }
 
-type UpdateDiff struct {
-	newDependants   []int
-	newDependencies []int
+type updateDiff struct {
+	dependants   sliceDiff
+	dependencies sliceDiff
 }
 
-func (d UpdateDiff) String() string {
-	return fmt.Sprintf("UpdateDiff{newDependants: %v, newDependencies: %v}", d.newDependants, d.newDependencies)
+func (d updateDiff) String() string {
+	return fmt.Sprintf("updateDiff{dependants: %v, dependencies: %v}", d.dependants, d.dependencies)
+}
+
+type sliceDiff struct {
+	added   []int
+	removed []int
+}
+
+func (d sliceDiff) String() string {
+	return fmt.Sprintf("sliceDiff{added: %v, removed: %v}", d.added, d.removed)
+}
+
+func computeSliceDiff(before, after []int) sliceDiff {
+	return sliceDiff{
+		added:   subtract(after, before),
+		removed: subtract(before, after),
+	}
+}
+
+// subtract returns integers that are in first but not second array
+func subtract(first, second []int) []int {
+	m := make(map[int]bool, len(second))
+	for _, b := range second {
+		m[b] = true
+	}
+	var sub []int
+	for _, a := range first {
+		if _, found := m[a]; !found {
+			sub = append(sub, a)
+		}
+	}
+	return sub
 }
 
 // update the DAG (if needed) with the re-executed execution node
 // returns the newly added Dependencies/Dependants for the new node
-func (dag *DependencyDag) update(newNode *ExecutionNode) UpdateDiff {
+func (dag *DependencyDag) update(newNode *ExecutionNode) updateDiff {
 	oldNode := dag.nodes[newNode.SeqId]
 
 	if oldNode == nil {
@@ -158,9 +189,9 @@ func (dag *DependencyDag) update(newNode *ExecutionNode) UpdateDiff {
 	afterDependants := dag.Dependants(newNode.SeqId)
 	afterDependencies := dag.Dependencies(newNode.SeqId)
 
-	return UpdateDiff{
-		newDependants:   subtract(afterDependants, beforeDependants),
-		newDependencies: subtract(afterDependencies, beforeDependencies),
+	return updateDiff{
+		dependants:   computeSliceDiff(beforeDependants, afterDependants),
+		dependencies: computeSliceDiff(beforeDependencies, afterDependencies),
 	}
 }
 
@@ -171,19 +202,9 @@ func (dag *DependencyDag) Execute(txExecutor *transactionExecutor, state *accoun
 	for workerId := 0; workerId < nWorkers; workerId++ {
 		go func(q <-chan processingTask) {
 			for task := range q {
-				node := dag.Node(task.nodeSeqId)
+				node := dag.Node(task.seqId)
 
-				// TODO(perf): Can we sometimes not Execute the node again (e.g. if it's the first Transaction)?
-				// We don't know if a Transaction was executed in the correct order,
-				// so we must always re-Execute it to see if anything changed, until we traverse the graph fully.
-
-				//if len(node.Reads) == 0 {
-				//	state.ApplyUpdates(node.SeqId, node.Updates)
-				//	task.done()
-				//	return
-				//}
-
-				if len(dag.Dependencies(node.SeqId)) == 0 || len(node.Reads) == 0 {
+				if !task.isStale {
 					state.ApplyUpdates(node.SeqId, node.Updates)
 					task.done()
 					return
@@ -197,18 +218,27 @@ func (dag *DependencyDag) Execute(txExecutor *transactionExecutor, state *accoun
 				// so we must revert the state update and reprocess at a later point to compute the correct state Updates.
 				// Invalidate entire descendants subgraph,
 				// because all the succeeding state Updates may be invalid as well.
-				dag.depthFirstSearch(diff.newDependants, func(seqId int) {
+				dag.depthFirstSearch(diff.dependants.added, func(seqId int) {
 					state.RevertUpdates(seqId, dag.Node(seqId).Updates)
 					executor.markUnvisited(seqId)
 				})
 
-				if len(diff.newDependencies) == 0 {
+				dag.depthFirstSearch(diff.dependants.removed, func(seqId int) {
+					state.RevertUpdates(seqId, dag.Node(seqId).Updates)
+					executor.markUnvisited(seqId)
+					// This node may not be reachable from the current subgraph,
+					// so we need a way to tell the executor to re-execute it
+					// alongside re-scheduling its processing (marking it unvisited).
+					executor.markStale(seqId)
+				})
+
+				if len(diff.dependencies.added) == 0 {
 					state.ApplyUpdates(reExecutedNode.SeqId, reExecutedNode.Updates)
 				} else {
 					// This node was moved to a different part of the DAG
 					// and should be processed again at a later point.
 					executor.markUnvisited(reExecutedNode.SeqId)
-					for _, seqId := range diff.newDependencies {
+					for _, seqId := range diff.dependencies.added {
 						executor.markUnvisited(seqId)
 					}
 					state.RevertUpdates(node.SeqId, node.Updates)
@@ -311,7 +341,7 @@ func (q *channelProcessingQueue) String() string {
 	for i, batch := range q.log {
 		out.WriteString("[")
 		for j, e := range batch {
-			out.WriteString(fmt.Sprintf("%d", e.nodeSeqId))
+			out.WriteString(fmt.Sprintf("%d", e.seqId))
 			if j != len(batch)-1 {
 				out.WriteString(",")
 			} else {
@@ -325,21 +355,6 @@ func (q *channelProcessingQueue) String() string {
 		}
 	}
 	return out.String()
-}
-
-// subtract returns integers that are in first but not second array
-func subtract(first, second []int) []int {
-	m := make(map[int]bool, len(second))
-	for _, b := range second {
-		m[b] = true
-	}
-	var sub []int
-	for _, a := range first {
-		if _, found := m[a]; !found {
-			sub = append(sub, a)
-		}
-	}
-	return sub
 }
 
 func sortNodesBySeqId(nodes []*ExecutionNode) {

@@ -80,7 +80,7 @@ func (node *ExecutionNode) String() string {
 	}
 
 	return fmt.Sprintf(
-		"ExecutionNode{nodeSeqId:%d,Reads:%s,Updates:%s,Err:%v}",
+		"ExecutionNode{seqId:%d,Reads:%s,Updates:%s,Err:%v}",
 		node.SeqId,
 		"("+strings.Join(readNames, ",")+")",
 		"("+strings.Join(updateEntries, ",")+")",

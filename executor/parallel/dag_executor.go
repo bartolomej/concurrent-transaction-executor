@@ -8,17 +8,19 @@ import (
 type dagExecutor struct {
 	// nodes in scheduledQueue were already processed
 	// and are waiting to be traversed to enqueue their Dependants
-	scheduledQueue  []int
+	scheduledQueue  []scheduledTask
 	processingQueue processingQueue
 	wg              sync.WaitGroup
 	mu              sync.Mutex
 	visited         []bool
+	stale           []bool
 	dag             *DependencyDag
 }
 
 func newDagExecutor(dag *DependencyDag, queue processingQueue) dagExecutor {
 	return dagExecutor{
 		visited:         make([]bool, len(dag.nodes)),
+		stale:           make([]bool, len(dag.nodes)),
 		dag:             dag,
 		processingQueue: queue,
 	}
@@ -32,7 +34,7 @@ func (e *dagExecutor) execute() {
 		// until (if) they are discovered to be part of one of the clusters.
 		// This will minimize the re-execution times.
 		if len(e.dag.Dependencies(seqId)) == 0 && len(e.dag.Dependants(seqId)) > 0 {
-			e.schedule(seqId)
+			e.schedule(seqId, false)
 		}
 	}
 
@@ -42,7 +44,7 @@ func (e *dagExecutor) execute() {
 
 		n := len(e.scheduledQueue)
 		for i := 0; i < n; i++ {
-			seqId := e.scheduledQueue[i]
+			seqId := e.scheduledQueue[i].seqId
 
 			// Stop with further sub-graph traversal from the current node,
 			// because the current node has new Dependencies,
@@ -59,7 +61,7 @@ func (e *dagExecutor) execute() {
 
 			for _, depSeqId := range dependants {
 				if len(e.unvisitedDependencies(depSeqId)) == 0 {
-					e.schedule(depSeqId)
+					e.schedule(depSeqId, true)
 				}
 			}
 		}
@@ -71,7 +73,7 @@ func (e *dagExecutor) execute() {
 	// Process leftover independent nodes that were not part of any dependency clusters.
 	for seqId := range e.dag.nodes {
 		if !e.visited[seqId] {
-			e.schedule(seqId)
+			e.schedule(seqId, e.stale[seqId])
 		}
 	}
 
@@ -100,17 +102,8 @@ func (e *dagExecutor) unvisitedDependants(seqId int) []int {
 	return unvisited
 }
 
-func (e *dagExecutor) schedule(seqId int) {
-	e.scheduledQueue = append(e.scheduledQueue, seqId)
-}
-
-func (e *dagExecutor) isScheduled(seqId int) bool {
-	for _, scheduledSeqId := range e.scheduledQueue {
-		if scheduledSeqId == seqId {
-			return true
-		}
-	}
-	return false
+func (e *dagExecutor) schedule(seqId int, isStale bool) {
+	e.scheduledQueue = append(e.scheduledQueue, scheduledTask{seqId, isStale})
 }
 
 // Can be called concurrently for different SeqId values
@@ -121,12 +114,21 @@ func (e *dagExecutor) markUnvisited(seqId int) {
 	e.visited[seqId] = false
 }
 
+// Can be called concurrently for different SeqId values
+func (e *dagExecutor) markStale(seqId int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.visited[seqId] = true
+}
+
 func (e *dagExecutor) awaitProcessing() {
 	if len(e.scheduledQueue) > 0 {
 		currBatch := make([]processingTask, 0, len(e.scheduledQueue))
-		for _, seqId := range e.scheduledQueue {
+		for _, task := range e.scheduledQueue {
 			currBatch = append(currBatch, processingTask{
-				nodeSeqId: seqId,
+				seqId:   task.seqId,
+				isStale: task.isStale,
 				done: func() {
 					e.wg.Done()
 				},
@@ -147,6 +149,12 @@ type processingQueue interface {
 }
 
 type processingTask struct {
-	nodeSeqId int
-	done      func()
+	seqId   int
+	isStale bool
+	done    func()
+}
+
+type scheduledTask struct {
+	seqId   int
+	isStale bool
 }
