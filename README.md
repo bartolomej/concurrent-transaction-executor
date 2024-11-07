@@ -21,9 +21,8 @@ We'll use this graph to determine which transactions are independent and can be 
 At each step during our DAG traversal, we will execute the next transaction in the DAG and compute the changes in its dependencies/dependants to determine how that affects the DAG and current state. 
 
 There are a few important cases here:
-1. **added dependencies** - stop the traversal from the current node, revert any state changes made, and continue by re-executing the current transaction.
-2. **added dependants** - revert any state changes made by the subgraph of the dependants and re-execute it
-3. **removed dependants** - revert any state changes made by the subgraph of the dependants and re-execute it
+1. **added dependencies** - revert any state changes made by the current node, and re-execute it
+2. **added dependants** or **removed dependants** - revert any state changes made by the subgraph of the dependants and re-execute it
 
 Terminology definitions for clarity:
 - dependency - transaction (represented as `ExecutionNode` in code) which updates the state read by the current transaction
