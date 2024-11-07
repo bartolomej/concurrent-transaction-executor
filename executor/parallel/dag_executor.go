@@ -1,18 +1,19 @@
 package parallel
 
 import (
+	"fmt"
 	"sync"
 )
 
-// dagExecutor handles topologically traversing the DAG and scheduling concurrent processing for independent set of nodes
+// dagExecutor handles topologically traversing the DAG and scheduling concurrent processingQueue for independent set of nodes
 type dagExecutor struct {
-	// Nodes in scheduled were enqueued for processing
+	// Nodes in scheduled were enqueued for processingQueue
 	// and are waiting to be visited to enqueue their dependants.
 	// Nodes get concurrently processed when calling processScheduled.
 	scheduled []scheduledTask
-	// Nodes that are currently processing.
-	// Their status is either processed or not.
-	processing processingQueue
+	processed []int
+	// Nodes that are currently processing
+	processingQueue processingQueue
 	// Wait group that synchronizes processing node status
 	// and unblocks when processing for all nodes completed.
 	wg sync.WaitGroup
@@ -38,7 +39,7 @@ func newDagExecutor(
 		visited:          make([]bool, len(dag.nodes)),
 		forceReExecution: make([]bool, len(dag.nodes)),
 		dag:              dag,
-		processing:       queue,
+		processingQueue:  queue,
 		txExecutor:       txExecutor,
 		state:            state,
 	}
@@ -51,7 +52,7 @@ func (e *dagExecutor) execute(nWorkers int) {
 			for task := range tasks {
 				e.processTask(task)
 			}
-		}(e.processing.tasks())
+		}(e.processingQueue.tasks())
 	}
 
 	e.traverse()
@@ -60,7 +61,7 @@ func (e *dagExecutor) execute(nWorkers int) {
 func (e *dagExecutor) processTask(task processingTask) {
 	node := e.dag.Node(task.seqId)
 
-	e.state.RevertUpdates(node.SeqId, node.Updates)
+	e.state.RevertUpdates(node.SeqId)
 
 	if !task.forceReExecution || len(node.Reads) == 0 {
 		e.state.ApplyUpdates(node.SeqId, node.Updates)
@@ -72,12 +73,12 @@ func (e *dagExecutor) processTask(task processingTask) {
 
 	diff := e.dag.update(reExecutedNode)
 
-	e.reExecuteSubgraphFrom(diff.dependants.added, true)
-	e.reExecuteSubgraphFrom(diff.dependants.removed, true)
-	// TODO: Why is tree test failing if I set revertState=true here?
-	e.reExecuteSubgraphFrom(diff.dependencies.added, false)
-
-	if len(diff.dependencies.added) == 0 {
+	e.reExecuteSubgraphFrom(diff.dependants.added)
+	e.reExecuteSubgraphFrom(diff.dependants.removed)
+	// TODO: This is failing because nodes may be duplicated in the scheduled queue
+	if len(diff.dependencies.added) > 0 {
+		e.reExecuteSubgraphFrom([]int{node.SeqId})
+	} else {
 		e.state.ApplyUpdates(reExecutedNode.SeqId, reExecutedNode.Updates)
 	}
 
@@ -97,11 +98,9 @@ func (e *dagExecutor) traverse() {
 
 	e.processScheduled()
 
-	for len(e.scheduled) > 0 {
+	for len(e.processed) > 0 {
 
-		n := len(e.scheduled)
-		for i := 0; i < n; i++ {
-			seqId := e.scheduled[i].seqId
+		for _, seqId := range e.processed {
 
 			// Stop with further sub-graph traversal from the current node,
 			// because the current node has new dependencies,
@@ -135,8 +134,6 @@ func (e *dagExecutor) traverse() {
 				}
 			}
 		}
-		e.scheduled = e.scheduled[n:]
-
 		e.processScheduled()
 	}
 
@@ -149,37 +146,25 @@ func (e *dagExecutor) traverse() {
 
 	e.processScheduled()
 
-	e.processing.close()
+	e.processingQueue.close()
 }
 
-func (e *dagExecutor) reExecuteSubgraphFrom(seqIds []int, revertState bool) {
-	// The given sub-graphs may or may not be connected to the ones we are currently processing,
+func (e *dagExecutor) reExecuteSubgraphFrom(seqIds []int) {
+	// The given sub-graphs may or may not be connected to the ones we are currently processingQueue,
 	// so we need to make sure to add the new disconnected sub-graphs to the queue,
 	// so that we'll visit and process them in the next steps.
 	for _, seqId := range seqIds {
-		dependencies := e.dag.Dependencies(seqId)
-		// TODO: Do we also need to validate that any of the dependencies of seqId are not already queued?
-		if len(dependencies) == 0 && !e.isScheduledOrProcessing(seqId) {
+		// TODO: Do we also need to instead check if there exists a path from one of our scheduled ones to seqId?
+		if len(e.unvisitedDependencies(seqId)) == 0 {
 			e.schedule(seqId, true)
 		}
 	}
 
 	e.dag.bfsFrom(seqIds, func(seqId int) {
-		e.scheduleReVisit(seqId)
-		e.scheduleReExecution(seqId)
-		if revertState {
-			e.state.RevertUpdates(seqId, e.dag.Node(seqId).Updates)
-		}
+		e.reVisit(seqId)
+		e.reExecute(seqId)
+		e.state.RevertUpdates(seqId)
 	})
-}
-
-func (e *dagExecutor) isScheduledOrProcessing(seqId int) bool {
-	for _, scheduled := range e.scheduled {
-		if scheduled.seqId == seqId {
-			return true
-		}
-	}
-	return false
 }
 
 func (e *dagExecutor) unvisitedDependencies(seqId int) []int {
@@ -203,11 +188,16 @@ func (e *dagExecutor) unvisitedDependants(seqId int) []int {
 }
 
 func (e *dagExecutor) schedule(seqId int, forceReExecution bool) {
+	for _, scheduled := range e.scheduled {
+		if scheduled.seqId == seqId {
+			panic(fmt.Sprintf("node %d was already scheduled", seqId))
+		}
+	}
 	e.scheduled = append(e.scheduled, scheduledTask{seqId, forceReExecution})
 }
 
 // Can be called concurrently for different SeqId values
-func (e *dagExecutor) scheduleReVisit(seqId int) {
+func (e *dagExecutor) reVisit(seqId int) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -215,7 +205,7 @@ func (e *dagExecutor) scheduleReVisit(seqId int) {
 }
 
 // Can be called concurrently for different SeqId values
-func (e *dagExecutor) scheduleReExecution(seqId int) {
+func (e *dagExecutor) reExecute(seqId int) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -223,6 +213,8 @@ func (e *dagExecutor) scheduleReExecution(seqId int) {
 }
 
 func (e *dagExecutor) processScheduled() {
+	e.processed = make([]int, 0, len(e.scheduled))
+
 	if len(e.scheduled) > 0 {
 		currBatch := make([]processingTask, 0, len(e.scheduled))
 		for _, task := range e.scheduled {
@@ -233,8 +225,13 @@ func (e *dagExecutor) processScheduled() {
 			})
 		}
 		e.wg.Add(len(currBatch))
-		e.processing.enqueue(currBatch)
+		e.processingQueue.enqueue(currBatch)
 		e.wg.Wait()
+
+		for _, task := range e.scheduled {
+			e.processed = append(e.processed, task.seqId)
+		}
+		e.scheduled = make([]scheduledTask, 0)
 	}
 }
 

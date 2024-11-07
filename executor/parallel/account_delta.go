@@ -13,14 +13,14 @@ import (
 type accountDelta struct {
 	updatedBalances       map[string]int
 	oldState              types.AccountState
-	appliedUpdatesBySeqId map[int]bool
+	appliedUpdatesBySeqId map[int][]types.AccountUpdate
 	mu                    sync.RWMutex
 }
 
 func newAccountDelta(oldState types.AccountState) *accountDelta {
 	return &accountDelta{
 		updatedBalances:       make(map[string]int),
-		appliedUpdatesBySeqId: make(map[int]bool),
+		appliedUpdatesBySeqId: make(map[int][]types.AccountUpdate),
 		oldState:              oldState,
 	}
 }
@@ -47,30 +47,28 @@ func (s *accountDelta) ApplyUpdates(seqId int, updates []types.AccountUpdate) {
 	defer s.mu.Unlock()
 
 	// Sanity check to detect possible bugs
-	if s.appliedUpdatesBySeqId[seqId] {
+	if len(s.appliedUpdatesBySeqId[seqId]) > 0 {
 		panic(fmt.Sprintf("updates were already applied for node %d", seqId))
 	}
 	for _, update := range updates {
 		s.write(update)
 	}
-	s.appliedUpdatesBySeqId[seqId] = true
+	s.appliedUpdatesBySeqId[seqId] = updates
 }
 
-func (s *accountDelta) RevertUpdates(seqId int, updates []types.AccountUpdate) {
+func (s *accountDelta) RevertUpdates(seqId int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if !s.appliedUpdatesBySeqId[seqId] {
-		return
-	}
-	for _, update := range updates {
+	for _, update := range s.appliedUpdatesBySeqId[seqId] {
 		inverseUpdate := types.AccountUpdate{
 			Name:          update.Name,
 			BalanceChange: -update.BalanceChange,
 		}
 		s.write(inverseUpdate)
 	}
-	s.appliedUpdatesBySeqId[seqId] = false
+
+	delete(s.appliedUpdatesBySeqId, seqId)
 }
 
 func (s *accountDelta) write(update types.AccountUpdate) {
