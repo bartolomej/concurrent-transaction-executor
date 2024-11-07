@@ -9,7 +9,7 @@ import (
 	"sync"
 )
 
-// accountDelta keeps track of the updated state and supports writing and reverting state changes
+// accountDelta tracks the updated startState and supports writing and reverting startState changes
 type accountDelta struct {
 	updatedBalances       map[string]int
 	oldState              types.AccountState
@@ -28,6 +28,7 @@ func newAccountDelta(oldState types.AccountState) *accountDelta {
 func (s *accountDelta) Get(name string) types.AccountValue {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	if balance, ok := s.updatedBalances[name]; ok {
 		return types.AccountValue{
 			Name:    name,
@@ -44,6 +45,8 @@ func (s *accountDelta) ApplyUpdates(seqId int, updates []types.AccountUpdate) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// Sanity check to detect possible bugs
 	if s.appliedUpdatesBySeqId[seqId] {
 		panic(fmt.Sprintf("updates were already applied for node %d", seqId))
 	}
@@ -56,6 +59,7 @@ func (s *accountDelta) ApplyUpdates(seqId int, updates []types.AccountUpdate) {
 func (s *accountDelta) RevertUpdates(seqId int, updates []types.AccountUpdate) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	if !s.appliedUpdatesBySeqId[seqId] {
 		return
 	}

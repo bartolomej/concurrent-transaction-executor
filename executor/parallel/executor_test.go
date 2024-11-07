@@ -30,29 +30,31 @@ func TestReExecutions_DependencyAddition_IndependentNodes(t *testing.T) {
 		},
 	}
 
-	executor := NewExecutor(5)
-	txExecutor := newTransactionExecutor(len(block.Transactions))
-	nodes := executor.executeOptimistically(&txExecutor, block.Transactions, startState)
+	nWorkers := 5
+
+	txExec := newTransactionExecutor(len(block.Transactions))
+	optimisticExec := newOptimisticExecutor(&txExec, block.Transactions, startState)
+	nodes := optimisticExec.execute(nWorkers)
 
 	for _, node := range nodes {
-		assertExecutionCountEqual(t, &txExecutor, node.SeqId, 1)
+		assertExecutionCountEqual(t, &txExec, node.SeqId, 1)
 	}
 
 	dag := NewDependencyDag(nodes)
 	queue := newChannelProcessingQueue()
-	dagExecutor := newDagExecutor(dag, queue)
-
 	delta := newAccountDelta(startState)
-	dagExecutor.execute(&txExecutor, delta, executor.nWorkers)
 
-	assertExecutionCountEqual(t, &txExecutor, 0, 1)
+	dagExec := newDagExecutor(dag, &queue, &txExec, delta)
+	dagExec.execute(nWorkers)
+
+	assertExecutionCountEqual(t, &txExec, 0, 1)
 	// Tx 1 has no inputs, so no other transaction can affect it's output.
-	assertExecutionCountEqual(t, &txExecutor, 1, 1)
-	assertExecutionCountEqual(t, &txExecutor, 2, 2)
-	assertExecutionCountEqual(t, &txExecutor, 3, 2)
-	assertExecutionCountEqual(t, &txExecutor, 4, 1)
-	assertExecutionCountEqual(t, &txExecutor, 5, 1)
-	assertExecutionCountEqual(t, &txExecutor, 6, 1)
+	assertExecutionCountEqual(t, &txExec, 1, 1)
+	assertExecutionCountEqual(t, &txExec, 2, 2)
+	assertExecutionCountEqual(t, &txExec, 3, 2)
+	assertExecutionCountEqual(t, &txExec, 4, 1)
+	assertExecutionCountEqual(t, &txExec, 5, 1)
+	assertExecutionCountEqual(t, &txExec, 6, 1)
 
 	expectedDelta := accountDelta{
 		oldState: startState,
@@ -70,7 +72,7 @@ func TestReExecutions_DependencyAddition_IndependentNodes(t *testing.T) {
 	}
 
 	if delta.String() != expectedDelta.String() {
-		t.Fatalf(`expected updated state "%s" but got "%s"`, expectedDelta.String(), delta.String())
+		t.Fatalf(`expected updated startState "%s" but got "%s"`, expectedDelta.String(), delta.String())
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"strings"
 )
 
+// transactionExecutor executes a single transaction and records runtime info like reads/updates/err
 type transactionExecutor struct {
 	// executionCount tracks the total execution count for every transaction by seq ID
 	executionCount []int
@@ -18,15 +19,15 @@ func newTransactionExecutor(transactionCount int) transactionExecutor {
 }
 
 type ExecutionNode struct {
-	// SeqId is a unique identifier that also indicates the Transaction order within a block
+	// SeqId is a unique (ordered) identifier that also indicates the Transaction order within a block
 	SeqId int
 	// Reads account names that were read by the Transaction
 	Reads []string
-	// Updates account state changes that were produced by the Transaction
+	// Updates account startState changes that were produced by the Transaction
 	Updates []types.AccountUpdate
 	// no Updates were produced if Err is set
 	Err error
-	// Transaction is the state transition function that produces Reads, Updates, Err
+	// Transaction is the startState transition function that produces Reads, Updates, Err
 	Transaction *types.Transaction
 }
 

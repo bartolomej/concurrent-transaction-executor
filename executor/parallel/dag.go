@@ -10,11 +10,12 @@ import (
 // DependencyDag is a Directed Acyclic Graph that is not necessarily connected.
 type DependencyDag struct {
 	nodes []*ExecutionNode
-	// dependantsById tracks a list of dependant nodes (reverse Dependencies) for every node ID
+	// dependantsById tracks a list of dependant nodes (reverse Dependencies) for every node seq ID
 	dependantsById map[int]map[int]bool
-	// dependenciesById tracks a list of dependency nodes for every node ID
+	// dependenciesById tracks a list of dependency nodes for every node seq ID
 	dependenciesById map[int]map[int]bool
-	mu               sync.RWMutex
+	// Mutex controls access to the above maps.
+	mu sync.RWMutex
 }
 
 // NewDependencyDag computes a dependency DAG given nodes
@@ -49,6 +50,12 @@ func (dag *DependencyDag) computeEdges() {
 	sortNodesBySeqId(orderedNodes)
 
 	for _, node := range orderedNodes {
+		// Computes dependencies for the current node.
+		// A dependency is a transaction node with lower seq ID that either:
+		// - updates an account the current node reads from,
+		//   so it must be executed before the current node.
+		// - reads the account the current node updates,
+		//   so the current node must be executed after.
 		dependencies := make(map[int]bool)
 		for _, read := range node.Reads {
 			for seqId := range seqIdsByUpdate[read] {
@@ -60,34 +67,35 @@ func (dag *DependencyDag) computeEdges() {
 				dependencies[seqId] = true
 			}
 		}
-		dag.dependenciesById[node.SeqId] = dependencies
 
+		// Update the reverse mapping.
 		for depSeqId := range dependencies {
-			_, ok := dag.dependantsById[depSeqId]
-			if !ok {
-				dag.dependantsById[depSeqId] = make(map[int]bool)
-			}
-			dag.dependantsById[depSeqId][node.SeqId] = true
+			addToMultiSet(dag.dependantsById, depSeqId, node.SeqId)
 		}
 
+		// Update temporary lookups.
 		for _, update := range node.Updates {
-			_, ok := seqIdsByUpdate[update.Name]
-			if !ok {
-				seqIdsByUpdate[update.Name] = make(map[int]bool)
-			}
-			seqIdsByUpdate[update.Name][node.SeqId] = true
+			addToMultiSet(seqIdsByUpdate, update.Name, node.SeqId)
+		}
+		for _, read := range node.Reads {
+			addToMultiSet(seqIdsByRead, read, node.SeqId)
 		}
 
-		for _, read := range node.Reads {
-			_, ok := seqIdsByRead[read]
-			if !ok {
-				seqIdsByRead[read] = make(map[int]bool)
-			}
-			seqIdsByRead[read][node.SeqId] = true
-		}
+		dag.dependenciesById[node.SeqId] = dependencies
 	}
 }
 
+// addToMultiSet adds the innerKey to the inner set under outerKey
+// while also ensuring that the inner set (map) is allocated.
+func addToMultiSet[K comparable](lookup map[K]map[int]bool, outerKey K, innerKey int) {
+	_, ok := lookup[outerKey]
+	if !ok {
+		lookup[outerKey] = make(map[int]bool)
+	}
+	lookup[outerKey][innerKey] = true
+}
+
+// NodeIds returns seq IDs for all nodes in the graph
 func (dag *DependencyDag) NodeIds() []int {
 	dag.mu.RLock()
 	defer dag.mu.RUnlock()
@@ -99,6 +107,7 @@ func (dag *DependencyDag) NodeIds() []int {
 	return result
 }
 
+// Node returns a reference to the ExecutionNode in the graph given seq ID
 func (dag *DependencyDag) Node(seqId int) *ExecutionNode {
 	dag.mu.RLock()
 	defer dag.mu.RUnlock()
@@ -106,6 +115,7 @@ func (dag *DependencyDag) Node(seqId int) *ExecutionNode {
 	return dag.nodes[seqId]
 }
 
+// Dependants returns all nodes (their seq IDs) that depend on the given seq ID
 func (dag *DependencyDag) Dependants(seqId int) []int {
 	dag.mu.RLock()
 	defer dag.mu.RUnlock()
@@ -117,6 +127,7 @@ func (dag *DependencyDag) Dependants(seqId int) []int {
 	return seqIds
 }
 
+// Dependencies returns all nodes (their seq IDs) that the given seqId depends on
 func (dag *DependencyDag) Dependencies(seqId int) []int {
 	dag.mu.RLock()
 	defer dag.mu.RUnlock()
@@ -128,6 +139,7 @@ func (dag *DependencyDag) Dependencies(seqId int) []int {
 	return seqIds
 }
 
+// updateDiff records the DAG changes for a single node update
 type updateDiff struct {
 	dependants   sliceDiff
 	dependencies sliceDiff
@@ -182,7 +194,6 @@ func (dag *DependencyDag) update(newNode *ExecutionNode) updateDiff {
 
 	dag.mu.Lock()
 	dag.nodes[newNode.SeqId] = newNode
-	// TODO(perf): Incrementally (without rebuilding the whole graph) compute edges?
 	dag.computeEdges()
 	dag.mu.Unlock()
 
@@ -195,9 +206,10 @@ func (dag *DependencyDag) update(newNode *ExecutionNode) updateDiff {
 	}
 }
 
-func (dag *DependencyDag) depthFirstSearch(fromSeqIds []int, shouldDescend func(int) bool) {
+// bfsFrom traverses the DAG with breadth first search from startSeqIds
+func (dag *DependencyDag) bfsFrom(startSeqIds []int, shouldDescend func(int) bool) {
 	q := make([]int, 0)
-	q = append(q, fromSeqIds...)
+	q = append(q, startSeqIds...)
 	for len(q) > 0 {
 		seqId := q[0]
 		q = q[1:]
@@ -251,6 +263,7 @@ func (dag *DependencyDag) String() string {
 	return sb.String()
 }
 
+// sortNodesBySeqId sorts nodes by seq ID in ascending order
 func sortNodesBySeqId(nodes []*ExecutionNode) {
 	slices.SortFunc(nodes, func(a, b *ExecutionNode) int {
 		if a.SeqId < b.SeqId {

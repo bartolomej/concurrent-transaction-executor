@@ -78,7 +78,7 @@ func TestComplexDagBuilding(t *testing.T) {
 			Reads:   []string{"B"},
 			Updates: []types.AccountUpdate{},
 		},
-		// If N+1 node Updates state that N node Reads,
+		// If N+1 node Updates startState that N node Reads,
 		// N+1 node must be scheduled after N, since it can affect its output.
 		{
 			SeqId: 3,
@@ -123,7 +123,7 @@ func TestComplexDagBuilding(t *testing.T) {
 	assertDagEqual(t, actual, expected)
 
 	testQueue := newTestDagQueue()
-	executor := newDagExecutor(actual, testQueue)
+	executor := newDagExecutor(actual, testQueue, nil, nil)
 	executor.traverse()
 
 	expectedWalkOrder := [][]int{
@@ -169,7 +169,7 @@ func TestSimpleScheduling(t *testing.T) {
 	})
 
 	testQueue := newTestDagQueue()
-	executor := newDagExecutor(dag, testQueue)
+	executor := newDagExecutor(dag, testQueue, nil, nil)
 	executor.traverse()
 
 	expected := [][]int{
@@ -223,7 +223,7 @@ func TestLongIndependentBranchesScheduling(t *testing.T) {
 	})
 
 	testQueue := newTestDagQueue()
-	executor := newDagExecutor(dag, testQueue)
+	executor := newDagExecutor(dag, testQueue, nil, nil)
 	executor.traverse()
 
 	expected := [][]int{

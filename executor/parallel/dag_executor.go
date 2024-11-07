@@ -6,86 +6,107 @@ import (
 
 // dagExecutor handles topologically traversing the DAG and scheduling concurrent processing for independent set of nodes
 type dagExecutor struct {
-	// nodes in scheduledQueue were already processed
-	// and are waiting to be traversed to enqueue their Dependants
-	scheduledQueue  []scheduledTask
-	processingQueue processingQueue
-	wg              sync.WaitGroup
-	mu              sync.Mutex
-	// visited tracks
+	// Nodes in scheduled were enqueued for processing
+	// and are waiting to be visited to enqueue their dependants.
+	// Nodes get concurrently processed when calling processScheduled.
+	scheduled []scheduledTask
+	// Nodes that are currently processing.
+	// Their status is either processed or not.
+	processing processingQueue
+	// Wait group that synchronizes processing node status
+	// and unblocks when processing for all nodes completed.
+	wg sync.WaitGroup
+	// Mutex that controls access to visited and stale maps.
+	mu sync.Mutex
+	// Node that was scheduled for processing is marked as visited.
 	visited []bool
-	stale   []bool
-	dag     *DependencyDag
+	// Node that was already processed but requires re-execution is marked as stale.
+	stale []bool
+	// References to other dependant structs.
+	dag        *DependencyDag
+	txExecutor *transactionExecutor
+	state      *accountDelta
 }
 
-func newDagExecutor(dag *DependencyDag, queue processingQueue) dagExecutor {
+func newDagExecutor(
+	dag *DependencyDag,
+	queue processingQueue,
+	txExecutor *transactionExecutor,
+	state *accountDelta,
+) dagExecutor {
 	return dagExecutor{
-		visited:         make([]bool, len(dag.nodes)),
-		stale:           make([]bool, len(dag.nodes)),
-		dag:             dag,
-		processingQueue: queue,
+		visited:    make([]bool, len(dag.nodes)),
+		stale:      make([]bool, len(dag.nodes)),
+		dag:        dag,
+		processing: queue,
+		txExecutor: txExecutor,
+		state:      state,
 	}
 }
 
-func (e *dagExecutor) execute(txExecutor *transactionExecutor, state *accountDelta, nWorkers int) {
+func (e *dagExecutor) execute(nWorkers int) {
 
 	for workerId := 0; workerId < nWorkers; workerId++ {
-		go func(q <-chan processingTask) {
-			for task := range q {
-				node := e.dag.Node(task.seqId)
-
-				if !task.isStale || len(node.Reads) == 0 {
-					state.ApplyUpdates(node.SeqId, node.Updates)
-					task.done()
-					return
-				}
-
-				reExecutedNode := txExecutor.execute(state, node.SeqId, *node.Transaction)
-
-				diff := e.dag.update(reExecutedNode)
-
-				// The new Updates may affect new nodes in the DAG,
-				// so we must revert the state update and reprocess at a later point to compute the correct state Updates.
-				// Invalidate entire descendants subgraph,
-				// because all the succeeding state Updates may be invalid as well.
-				e.dag.depthFirstSearch(diff.dependants.added, func(seqId int) bool {
-					state.RevertUpdates(seqId, e.dag.Node(seqId).Updates)
-					e.markUnvisited(seqId)
-
-					// TODO(perf): Stop descend if this node was previously unvisited
-					return true
-				})
-
-				e.dag.depthFirstSearch(diff.dependants.removed, func(seqId int) bool {
-					state.RevertUpdates(seqId, e.dag.Node(seqId).Updates)
-					e.markUnvisited(seqId)
-					// This node may not be reachable from the current subgraph,
-					// so we need a way to tell the e to re-execute it
-					// alongside re-scheduling its processing (marking it unvisited).
-					e.markStale(seqId)
-
-					// TODO(perf): Stop descend if this node was previously unvisited?
-					return true
-				})
-
-				if len(diff.dependencies.added) == 0 {
-					state.ApplyUpdates(reExecutedNode.SeqId, reExecutedNode.Updates)
-				} else {
-					// This node was moved to a different part of the DAG
-					// and should be processed again at a later point.
-					e.markUnvisited(reExecutedNode.SeqId)
-					for _, seqId := range diff.dependencies.added {
-						e.markUnvisited(seqId)
-					}
-					state.RevertUpdates(node.SeqId, node.Updates)
-				}
-
-				task.done()
+		go func(tasks <-chan processingTask) {
+			for task := range tasks {
+				e.processTask(task)
 			}
-		}(e.processingQueue.tasks())
+		}(e.processing.tasks())
 	}
 
 	e.traverse()
+}
+
+func (e *dagExecutor) processTask(task processingTask) {
+	node := e.dag.Node(task.seqId)
+
+	if !task.isStale || len(node.Reads) == 0 {
+		e.state.ApplyUpdates(node.SeqId, node.Updates)
+		task.done()
+		return
+	}
+
+	reExecutedNode := e.txExecutor.execute(e.state, node.SeqId, *node.Transaction)
+
+	diff := e.dag.update(reExecutedNode)
+
+	// The new Updates may affect new nodes in the DAG,
+	// so we must revert the startState update and reprocess at a later point to compute the correct startState Updates.
+	// Invalidate entire descendants subgraph,
+	// because all the succeeding startState Updates may be invalid as well.
+	e.dag.bfsFrom(diff.dependants.added, func(seqId int) bool {
+		e.state.RevertUpdates(seqId, e.dag.Node(seqId).Updates)
+		e.markUnvisited(seqId)
+
+		// TODO(perf): Stop descend if this node was previously unvisited
+		return true
+	})
+
+	e.dag.bfsFrom(diff.dependants.removed, func(seqId int) bool {
+		e.state.RevertUpdates(seqId, e.dag.Node(seqId).Updates)
+		e.markUnvisited(seqId)
+		// This node may not be reachable from the current subgraph,
+		// so we need a way to tell the e to re-execute it
+		// alongside re-scheduling its processing (marking it unvisited).
+		e.markStale(seqId)
+
+		// TODO(perf): Stop descend if this node was previously unvisited?
+		return true
+	})
+
+	if len(diff.dependencies.added) == 0 {
+		e.state.ApplyUpdates(reExecutedNode.SeqId, reExecutedNode.Updates)
+	} else {
+		// This node was moved to a different part of the DAG
+		// and should be processed again at a later point.
+		e.markUnvisited(reExecutedNode.SeqId)
+		for _, seqId := range diff.dependencies.added {
+			e.markUnvisited(seqId)
+		}
+		e.state.RevertUpdates(node.SeqId, node.Updates)
+	}
+
+	task.done()
 }
 
 func (e *dagExecutor) traverse() {
@@ -100,13 +121,13 @@ func (e *dagExecutor) traverse() {
 		}
 	}
 
-	e.awaitProcessing()
+	e.processScheduled()
 
-	for len(e.scheduledQueue) > 0 {
+	for len(e.scheduled) > 0 {
 
-		n := len(e.scheduledQueue)
+		n := len(e.scheduled)
 		for i := 0; i < n; i++ {
-			seqId := e.scheduledQueue[i].seqId
+			seqId := e.scheduled[i].seqId
 
 			// Stop with further sub-graph traversal from the current node,
 			// because the current node has new Dependencies,
@@ -127,21 +148,22 @@ func (e *dagExecutor) traverse() {
 				}
 			}
 		}
-		e.scheduledQueue = e.scheduledQueue[n:]
+		e.scheduled = e.scheduled[n:]
 
-		e.awaitProcessing()
+		e.processScheduled()
 	}
 
 	// Process leftover independent nodes that were not part of any dependency clusters.
 	for seqId := range e.dag.nodes {
 		if !e.visited[seqId] {
+			// TODO: Can it happen that the node has descendant nodes that are not scheduled here?
 			e.schedule(seqId, e.stale[seqId])
 		}
 	}
 
-	e.awaitProcessing()
+	e.processScheduled()
 
-	e.processingQueue.close()
+	e.processing.close()
 }
 
 func (e *dagExecutor) unvisitedDependencies(seqId int) []int {
@@ -165,7 +187,7 @@ func (e *dagExecutor) unvisitedDependants(seqId int) []int {
 }
 
 func (e *dagExecutor) schedule(seqId int, isStale bool) {
-	e.scheduledQueue = append(e.scheduledQueue, scheduledTask{seqId, isStale})
+	e.scheduled = append(e.scheduled, scheduledTask{seqId, isStale})
 }
 
 // Can be called concurrently for different SeqId values
@@ -184,20 +206,18 @@ func (e *dagExecutor) markStale(seqId int) {
 	e.visited[seqId] = true
 }
 
-func (e *dagExecutor) awaitProcessing() {
-	if len(e.scheduledQueue) > 0 {
-		currBatch := make([]processingTask, 0, len(e.scheduledQueue))
-		for _, task := range e.scheduledQueue {
+func (e *dagExecutor) processScheduled() {
+	if len(e.scheduled) > 0 {
+		currBatch := make([]processingTask, 0, len(e.scheduled))
+		for _, task := range e.scheduled {
 			currBatch = append(currBatch, processingTask{
 				seqId:   task.seqId,
 				isStale: task.isStale,
-				done: func() {
-					e.wg.Done()
-				},
+				done:    e.wg.Done,
 			})
 		}
 		e.wg.Add(len(currBatch))
-		e.processingQueue.enqueue(currBatch)
+		e.processing.enqueue(currBatch)
 		e.wg.Wait()
 	}
 }
@@ -226,8 +246,8 @@ type channelProcessingQueue struct {
 	queue chan processingTask
 }
 
-func newChannelProcessingQueue() *channelProcessingQueue {
-	return &channelProcessingQueue{queue: make(chan processingTask)}
+func newChannelProcessingQueue() channelProcessingQueue {
+	return channelProcessingQueue{queue: make(chan processingTask)}
 }
 
 func (q *channelProcessingQueue) enqueue(units []processingTask) {
