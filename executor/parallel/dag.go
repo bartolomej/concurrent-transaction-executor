@@ -207,16 +207,16 @@ func (dag *DependencyDag) update(newNode *ExecutionNode) updateDiff {
 }
 
 // bfsFrom traverses the DAG with breadth first search from startSeqIds
-func (dag *DependencyDag) bfsFrom(startSeqIds []int, shouldDescend func(int) bool) {
+func (dag *DependencyDag) bfsFrom(startSeqIds []int, callback func(int)) {
 	q := make([]int, 0)
 	q = append(q, startSeqIds...)
 	for len(q) > 0 {
 		seqId := q[0]
 		q = q[1:]
 
-		if shouldDescend(seqId) {
-			q = append(q, dag.Dependants(seqId)...)
-		}
+		callback(seqId)
+
+		q = append(q, dag.Dependants(seqId)...)
 	}
 }
 

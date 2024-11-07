@@ -149,7 +149,7 @@ func TestBlockingSequentialTransactions(t *testing.T) {
 func TestTreeLikeConcurrentTransactions(t *testing.T) {
 	rootAccount := "A"
 	leafAccount := "B"
-	maxDepth := 4
+	maxDepth := 10
 	rootBalance := uint(math.Pow(2, float64(maxDepth)))
 
 	startState := testAccountState{
@@ -170,8 +170,7 @@ func TestTreeLikeConcurrentTransactions(t *testing.T) {
 		{Name: leafAccount, Balance: rootBalance},
 	}
 
-	// Note: A noticeable perf improvement for parallel execution is only visible
-	// when transactions are doing more intensive work (e.g. loops with 1000+ iterations or I/O)
+	// In this case, concurrent execution performs worst when the transaction execution isn't blocking.
 	assertExecution(t, expectedUpdateState, block, startState, serial.NewExecutor(), "serial")
 	assertExecution(t, expectedUpdateState, block, startState, parallel.NewExecutor(10), "parallel")
 }
@@ -190,7 +189,7 @@ func buildTransferTree(id *int, from string, amount uint, endAccount string) []s
 	}
 
 	txs = append(txs, sleepingTransaction{
-		duration: time.Millisecond * 100,
+		duration: time.Millisecond * 10,
 		child: transactions.Transfer{
 			From:  from,
 			To:    to,

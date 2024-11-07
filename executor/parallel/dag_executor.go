@@ -60,6 +60,8 @@ func (e *dagExecutor) execute(nWorkers int) {
 func (e *dagExecutor) processTask(task processingTask) {
 	node := e.dag.Node(task.seqId)
 
+	e.state.RevertUpdates(node.SeqId, node.Updates)
+
 	if !task.forceReExecution || len(node.Reads) == 0 {
 		e.state.ApplyUpdates(node.SeqId, node.Updates)
 		task.done()
@@ -70,46 +72,13 @@ func (e *dagExecutor) processTask(task processingTask) {
 
 	diff := e.dag.update(reExecutedNode)
 
-	// The new Updates may affect new nodes in the DAG,
-	// so we must revert the startState update and reprocess at a later point to compute the correct startState Updates.
-	// Invalidate entire descendants subgraph,
-	// because all the succeeding startState Updates may be invalid as well.
-	e.dag.bfsFrom(diff.dependants.added, func(seqId int) bool {
-		e.state.RevertUpdates(seqId, e.dag.Node(seqId).Updates)
-		if !e.visited[seqId] {
-			e.scheduleReVisit(seqId)
-			// Optimisation - stop further descend from the current node.
-			return false
-		} else {
-			return true
-		}
-	})
-
-	e.dag.bfsFrom(diff.dependants.removed, func(seqId int) bool {
-		e.state.RevertUpdates(seqId, e.dag.Node(seqId).Updates)
-		if !e.visited[seqId] {
-			e.scheduleReVisit(seqId)
-			// This node may not be reachable from the current subgraph,
-			// so we need a way to tell the e to re-execute it
-			// alongside re-scheduling its processing (marking it unvisited).
-			e.scheduleReExecution(seqId)
-			// Optimisation - stop further descend from the current node.
-			return false
-		} else {
-			return true
-		}
-	})
+	e.reExecuteSubgraphFrom(diff.dependants.added, true)
+	e.reExecuteSubgraphFrom(diff.dependants.removed, true)
+	// TODO: Why is tree test failing if I set revertState=true here?
+	e.reExecuteSubgraphFrom(diff.dependencies.added, false)
 
 	if len(diff.dependencies.added) == 0 {
 		e.state.ApplyUpdates(reExecutedNode.SeqId, reExecutedNode.Updates)
-	} else {
-		// This node was moved to a different part of the DAG
-		// and should be processed again at a later point.
-		e.scheduleReVisit(reExecutedNode.SeqId)
-		for _, seqId := range diff.dependencies.added {
-			e.scheduleReVisit(seqId)
-		}
-		e.state.RevertUpdates(node.SeqId, node.Updates)
 	}
 
 	task.done()
@@ -181,6 +150,36 @@ func (e *dagExecutor) traverse() {
 	e.processScheduled()
 
 	e.processing.close()
+}
+
+func (e *dagExecutor) reExecuteSubgraphFrom(seqIds []int, revertState bool) {
+	// The given sub-graphs may or may not be connected to the ones we are currently processing,
+	// so we need to make sure to add the new disconnected sub-graphs to the queue,
+	// so that we'll visit and process them in the next steps.
+	for _, seqId := range seqIds {
+		dependencies := e.dag.Dependencies(seqId)
+		// TODO: Do we also need to validate that any of the dependencies of seqId are not already queued?
+		if len(dependencies) == 0 && !e.isScheduledOrProcessing(seqId) {
+			e.schedule(seqId, true)
+		}
+	}
+
+	e.dag.bfsFrom(seqIds, func(seqId int) {
+		e.scheduleReVisit(seqId)
+		e.scheduleReExecution(seqId)
+		if revertState {
+			e.state.RevertUpdates(seqId, e.dag.Node(seqId).Updates)
+		}
+	})
+}
+
+func (e *dagExecutor) isScheduledOrProcessing(seqId int) bool {
+	for _, scheduled := range e.scheduled {
+		if scheduled.seqId == seqId {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *dagExecutor) unvisitedDependencies(seqId int) []int {
