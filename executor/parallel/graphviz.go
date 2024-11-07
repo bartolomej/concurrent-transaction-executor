@@ -19,6 +19,7 @@ type Graphviz struct {
 	NodeLabelColor   Color
 	EdgeLabelColor   Color
 	EdgeFillColor    Color
+	GetNodeLabel     func(seqId int) string
 }
 
 func (g *Graphviz) Generate(dag *DependencyDag) string {
@@ -60,7 +61,11 @@ func (g *Graphviz) Generate(dag *DependencyDag) string {
 }
 
 func (g *Graphviz) nodeName(seqId int) string {
-	return fmt.Sprintf("%d", seqId)
+	if g.GetNodeLabel == nil {
+		return fmt.Sprintf("%d", seqId)
+	} else {
+		return g.GetNodeLabel(seqId)
+	}
 }
 
 type Color struct {

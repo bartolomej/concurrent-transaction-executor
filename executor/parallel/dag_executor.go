@@ -235,6 +235,21 @@ func (e *dagExecutor) processScheduled() {
 	}
 }
 
+func (e *dagExecutor) Graphviz() string {
+	graphViz := Graphviz{
+		Name:             "DependencyGraph",
+		NodeFillColor:    NewRgbColor(142, 202, 230),
+		NodeLabelColor:   NewRgbColor(2, 48, 71),
+		NodeOutlineColor: NewRgbColor(255, 183, 3),
+		EdgeLabelColor:   NewRgbColor(33, 158, 188),
+		EdgeFillColor:    NewRgbColor(2, 48, 71),
+		GetNodeLabel: func(seqId int) string {
+			return fmt.Sprintf("\"%d (%d)\"", seqId, e.txExecutor.executionCount[seqId])
+		},
+	}
+	return graphViz.Generate(e.dag)
+}
+
 // processingQueue abstracts away the queue implementation (done with channels in channelProcessingQueue)
 // so that it's easier to test the batches that are enqueued at different steps.
 type processingQueue interface {
