@@ -18,11 +18,16 @@ Our algorithm will need to keep track of the dependencies over time.
 To do this, we will record the reads and updates of each transaction execution and incrementally build the correct DAG (Directed Acyclic Graph) of dependencies between different transactions.
 We'll use this graph to determine which transactions are independent and can be executed concurrently with a modified topological sort algorithm. 
 
-At each step during our DAG traversal, we will execute the next transaction in the DAG and check if reads or updates changed since the last execution. 
+At each step during our DAG traversal, we will execute the next transaction in the DAG and compute the changes in its dependencies/dependants to determine how that affects the DAG and current state. 
 
-There are two important cases here:
-1. **new dependencies are found** (transactions that update the state that the current transaction reads) - stop the traversal from the current node, revert any state changes made, and continue by re-executing the current transaction.
-2. **new dependants are found** (transactions that read the state that the current transaction updates) - revert any state changes made by the subgraph of the dependants and re-execute it
+There are a few important cases here:
+1. **added dependencies** - stop the traversal from the current node, revert any state changes made, and continue by re-executing the current transaction.
+2. **added dependants** - revert any state changes made by the subgraph of the dependants and re-execute it
+3. **removed dependants** - revert any state changes made by the subgraph of the dependants and re-execute it
+
+Terminology definitions for clarity:
+- dependency - transaction (represented as `ExecutionNode` in code) which updates the state read by the current transaction
+- dependant - transaction (also represented as `ExecutionNode` in code) which reads the state updated by the current transaction
 
 ## Example
 
