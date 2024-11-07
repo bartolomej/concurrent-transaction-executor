@@ -48,6 +48,7 @@ func (s *accountDelta) ApplyUpdates(seqId int, updates []types.AccountUpdate) {
 
 	// Sanity check to detect possible bugs
 	if len(s.appliedUpdatesBySeqId[seqId]) > 0 {
+		// This should be caught in tests since it's a developer error.
 		panic(fmt.Sprintf("updates were already applied for node %d", seqId))
 	}
 	for _, update := range updates {

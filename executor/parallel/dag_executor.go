@@ -73,12 +73,12 @@ func (e *dagExecutor) processTask(task processingTask) {
 
 	diff := e.dag.update(reExecutedNode)
 
-	e.reExecuteSubgraphFrom(diff.dependants.added)
-	e.reExecuteSubgraphFrom(diff.dependants.removed)
-	// TODO: This is failing because nodes may be duplicated in the scheduled queue
-	if len(diff.dependencies.added) > 0 {
-		e.reExecuteSubgraphFrom([]int{node.SeqId})
-	} else {
+	e.reExecuteSubgraphFrom(diff.dependants.added, true)
+	e.reExecuteSubgraphFrom(diff.dependants.removed, true)
+	// TODO: Why is TestTreeLikeConcurrentTransactions test failing if I set revertState=true here?
+	e.reExecuteSubgraphFrom(diff.dependencies.added, false)
+
+	if len(diff.dependencies.added) == 0 {
 		e.state.ApplyUpdates(reExecutedNode.SeqId, reExecutedNode.Updates)
 	}
 
@@ -149,13 +149,13 @@ func (e *dagExecutor) traverse() {
 	e.processingQueue.close()
 }
 
-func (e *dagExecutor) reExecuteSubgraphFrom(seqIds []int) {
+func (e *dagExecutor) reExecuteSubgraphFrom(seqIds []int, revertState bool) {
 	// The given sub-graphs may or may not be connected to the ones we are currently processingQueue,
 	// so we need to make sure to add the new disconnected sub-graphs to the queue,
 	// so that we'll visit and process them in the next steps.
 	for _, seqId := range seqIds {
-		// TODO: Do we also need to instead check if there exists a path from one of our scheduled ones to seqId?
-		if len(e.unvisitedDependencies(seqId)) == 0 {
+		// TODO: Should we instead check if there exists a path from one of our scheduled ones to seqId?
+		if len(e.dag.Dependencies(seqId)) == 0 && !e.isScheduled(seqId) {
 			e.schedule(seqId, true)
 		}
 	}
@@ -163,7 +163,9 @@ func (e *dagExecutor) reExecuteSubgraphFrom(seqIds []int) {
 	e.dag.bfsFrom(seqIds, func(seqId int) {
 		e.reVisit(seqId)
 		e.reExecute(seqId)
-		e.state.RevertUpdates(seqId)
+		if revertState {
+			e.state.RevertUpdates(seqId)
+		}
 	})
 }
 
@@ -188,12 +190,20 @@ func (e *dagExecutor) unvisitedDependants(seqId int) []int {
 }
 
 func (e *dagExecutor) schedule(seqId int, forceReExecution bool) {
-	for _, scheduled := range e.scheduled {
-		if scheduled.seqId == seqId {
-			panic(fmt.Sprintf("node %d was already scheduled", seqId))
-		}
+	if e.isScheduled(seqId) {
+		// This should be caught in tests since it's a developer error
+		panic(fmt.Sprintf("node %d is already scheduled", seqId))
 	}
 	e.scheduled = append(e.scheduled, scheduledTask{seqId, forceReExecution})
+}
+
+func (e *dagExecutor) isScheduled(seqId int) bool {
+	for _, scheduled := range e.scheduled {
+		if scheduled.seqId == seqId {
+			return true
+		}
+	}
+	return false
 }
 
 // Can be called concurrently for different SeqId values
