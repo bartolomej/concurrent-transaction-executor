@@ -34,7 +34,18 @@ In this example we will use these example transactions:
 - `Transfer{From, To, Amount}` - [transactions/transfer.go](./transactions/transfer.go)
 - `Mint{To, Amount}` - [transactions/mint.go](./transactions/mint.go)
 
-Let's say our concurrent executor receives the following transactions:
+Let's say this is our initial (account) state before the next block:
+
+```go
+{
+    types.AccountValue{Name: "A", Balance: 10},
+    types.AccountValue{Name: "E", Balance: 10},
+    types.AccountValue{Name: "G", Balance: 10},
+    types.AccountValue{Name: "I", Balance: 10},
+}
+```
+
+... and the next block arrives with the following transactions:
 
 ```go
 {
