@@ -122,5 +122,5 @@ So the performance of concurrent execution largely depends on:
 
 In a real world implementation, the execution engine may implement some kind of heuristic to determine whether to use sequential or concurrent execution like:
 - connectedness of the DAG
-- the status of state caches (concurrent execution may be beneficial if we need to make lots of blocking calls to read data from disk)
+- the status of state caches (concurrent execution is mostly beneficial when processing involves blocking calls - e.g. to state read data from disk)
 - ...

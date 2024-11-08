@@ -170,7 +170,7 @@ func TestTreeLikeConcurrentTransactions(t *testing.T) {
 		{Name: leafAccount, Balance: rootBalance},
 	}
 
-	// In this case, concurrent execution performs worst when the transaction execution isn't blocking.
+	// Concurrent execution performs pretty bad when the transaction execution isn't blocking.
 	assertExecution(t, expectedUpdateState, block, startState, serial.NewExecutor(), "serial")
 	assertExecution(t, expectedUpdateState, block, startState, parallel.NewExecutor(10), "parallel")
 }
