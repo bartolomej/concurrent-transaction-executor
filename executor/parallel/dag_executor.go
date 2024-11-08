@@ -75,7 +75,6 @@ func (e *dagExecutor) processTask(task processingTask) {
 
 	e.reExecuteSubgraphFrom(diff.dependants.added, true)
 	e.reExecuteSubgraphFrom(diff.dependants.removed, true)
-	// TODO: Why is TestTreeLikeConcurrentTransactions test failing if I set revertState=true here?
 	e.reExecuteSubgraphFrom(diff.dependencies.added, false)
 
 	if len(diff.dependencies.added) == 0 {
@@ -106,7 +105,6 @@ func (e *dagExecutor) traverse() {
 			// because the current node has new dependencies,
 			// which must be reprocessed first.
 			if len(e.unvisitedDependencies(seqId)) > 0 {
-				// TODO: What if the dependencies are not reachable anymore?
 				// We can safely skip this node,
 				// since the path from one of the new Dependencies
 				// will lead to this node eventually.
@@ -154,7 +152,6 @@ func (e *dagExecutor) reExecuteSubgraphFrom(seqIds []int, revertState bool) {
 	// so we need to make sure to add the new disconnected sub-graphs to the queue,
 	// so that we'll visit and process them in the next steps.
 	for _, seqId := range seqIds {
-		// TODO: Should we instead check if there exists a path from one of our scheduled ones to seqId?
 		if len(e.dag.Dependencies(seqId)) == 0 && !e.isScheduled(seqId) {
 			e.schedule(seqId, true)
 		}
