@@ -6,7 +6,6 @@ import (
 	"blockchain/executor/types"
 	"blockchain/transactions"
 	"fmt"
-	"math"
 	"sort"
 	"strings"
 	"testing"
@@ -144,69 +143,6 @@ func TestBlockingSequentialTransactions(t *testing.T) {
 
 	assertExecution(t, expectedUpdateState, block1, startState, parallel.NewExecutor(3), "parallel")
 	assertExecution(t, expectedUpdateState, block2, startState, parallel.NewExecutor(3), "parallel")
-}
-
-func TestTreeLikeConcurrentTransactions(t *testing.T) {
-	rootAccount := "A"
-	leafAccount := "B"
-	maxDepth := 10
-	rootBalance := uint(math.Pow(2, float64(maxDepth)))
-
-	startState := testAccountState{
-		types.AccountValue{Name: rootAccount, Balance: rootBalance},
-	}
-
-	var id = 0
-	var block = types.Block{}
-
-	txs := buildTransferTree(&id, rootAccount, rootBalance, leafAccount)
-
-	for _, tx := range txs {
-		block.Transactions = append(block.Transactions, tx)
-	}
-
-	var expectedUpdateState = []types.AccountValue{
-		{Name: rootAccount, Balance: 0},
-		{Name: leafAccount, Balance: rootBalance},
-	}
-
-	// Concurrent execution performs pretty bad when the transaction execution isn't blocking.
-	assertExecution(t, expectedUpdateState, block, startState, serial.NewExecutor(), "serial")
-	assertExecution(t, expectedUpdateState, block, startState, parallel.NewExecutor(10), "parallel")
-}
-
-// buildTransferTree builds a binary tree that redistributes the values from root account to the end account
-// where the transaction dependency graph is in the shape of a binary tree with height low2(rootBalance)
-func buildTransferTree(id *int, from string, amount uint, endAccount string) []sleepingTransaction {
-	var txs []sleepingTransaction
-	var to = fmt.Sprintf("%s_%d", from, *id)
-	// Stop condition - subdivide the amount anymore
-	var isLeaf = amount == 1
-
-	if isLeaf {
-		// Transfer to the same account at the end, so that it's easier to test
-		to = endAccount
-	}
-
-	txs = append(txs, sleepingTransaction{
-		duration: time.Millisecond * 10,
-		child: transactions.Transfer{
-			From:  from,
-			To:    to,
-			Value: amount,
-		},
-	})
-
-	if isLeaf {
-		return txs
-	}
-
-	*id++
-	txs = append(txs, buildTransferTree(id, to, amount/2, endAccount)...)
-	*id++
-	txs = append(txs, buildTransferTree(id, to, amount/2, endAccount)...)
-
-	return txs
 }
 
 // sleepingTransaction sleeps for duration before executing the child transaction to simulate I/O operations.

@@ -73,9 +73,9 @@ func (e *dagExecutor) processTask(task processingTask) {
 
 	diff := e.dag.update(reExecutedNode)
 
-	e.reExecuteSubgraphFrom(diff.dependants.added, true)
-	e.reExecuteSubgraphFrom(diff.dependants.removed, true)
-	e.reExecuteSubgraphFrom(diff.dependencies.added, false)
+	e.reExecuteSubgraphFrom(diff.dependants.added)
+	e.reExecuteSubgraphFrom(diff.dependants.removed)
+	e.reExecuteSubgraphFrom(diff.dependencies.added)
 
 	if len(diff.dependencies.added) == 0 {
 		e.state.ApplyUpdates(reExecutedNode.SeqId, reExecutedNode.Updates)
@@ -147,7 +147,7 @@ func (e *dagExecutor) traverse() {
 	e.processingQueue.close()
 }
 
-func (e *dagExecutor) reExecuteSubgraphFrom(seqIds []int, revertState bool) {
+func (e *dagExecutor) reExecuteSubgraphFrom(seqIds []int) {
 	// The given sub-graphs may or may not be connected to the ones we are currently processingQueue,
 	// so we need to make sure to add the new disconnected sub-graphs to the queue,
 	// so that we'll visit and process them in the next steps.
@@ -160,9 +160,7 @@ func (e *dagExecutor) reExecuteSubgraphFrom(seqIds []int, revertState bool) {
 	e.dag.bfsFrom(seqIds, func(seqId int) {
 		e.reVisit(seqId)
 		e.reExecute(seqId)
-		if revertState {
-			e.state.RevertUpdates(seqId)
-		}
+		e.state.RevertUpdates(seqId)
 	})
 }
 
