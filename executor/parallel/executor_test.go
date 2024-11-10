@@ -30,31 +30,16 @@ func TestReExecutions_DependencyAddition_IndependentNodes(t *testing.T) {
 		},
 	}
 
-	nWorkers := 5
+	txExec, delta, _ := execute(t, block, startState)
 
-	txExec := newTransactionExecutor(len(block.Transactions))
-	optimisticExec := newOptimisticExecutor(&txExec, block.Transactions, startState)
-	nodes := optimisticExec.execute(nWorkers)
-
-	for _, node := range nodes {
-		assertExecutionCountEqual(t, &txExec, node.SeqId, 1)
-	}
-
-	dag := NewDependencyDag(nodes)
-	queue := newChannelProcessingQueue()
-	delta := newAccountDelta(startState)
-
-	dagExec := newDagExecutor(dag, &queue, &txExec, delta)
-	dagExec.execute(nWorkers)
-
-	assertExecutionCountEqual(t, &txExec, 0, 1)
+	assertExecutionCountEqual(t, txExec, 0, 1)
 	// Tx 1 has no inputs, so no other transaction can affect it's output.
-	assertExecutionCountEqual(t, &txExec, 1, 1)
-	assertExecutionCountEqual(t, &txExec, 2, 2)
-	assertExecutionCountEqual(t, &txExec, 3, 2)
-	assertExecutionCountEqual(t, &txExec, 4, 1)
-	assertExecutionCountEqual(t, &txExec, 5, 1)
-	assertExecutionCountEqual(t, &txExec, 6, 1)
+	assertExecutionCountEqual(t, txExec, 1, 1)
+	assertExecutionCountEqual(t, txExec, 2, 2)
+	assertExecutionCountEqual(t, txExec, 3, 2)
+	assertExecutionCountEqual(t, txExec, 4, 1)
+	assertExecutionCountEqual(t, txExec, 5, 1)
+	assertExecutionCountEqual(t, txExec, 6, 1)
 
 	expectedDelta := accountDelta{
 		oldState: startState,
@@ -71,8 +56,69 @@ func TestReExecutions_DependencyAddition_IndependentNodes(t *testing.T) {
 		},
 	}
 
-	if delta.String() != expectedDelta.String() {
-		t.Fatalf(`expected updated startState "%s" but got "%s"`, expectedDelta.String(), delta.String())
+	assertDelta(t, &expectedDelta, delta)
+}
+
+func TestReExecutions_IncrementallyDependantNodes(t *testing.T) {
+	startState := testAccountState{
+		types.AccountValue{Name: "A", Balance: 0},
+		types.AccountValue{Name: "B", Balance: 0},
+		types.AccountValue{Name: "C", Balance: 0},
+	}
+
+	block := types.Block{
+		Transactions: []types.Transaction{
+			transactions.Mint{To: "A", Value: 20},
+			transactions.Transfer{From: "A", To: "B", Value: 10},
+			transactions.Transfer{From: "A", To: "C", Value: 10},
+		},
+	}
+
+	txExec, delta, _ := execute(t, block, startState)
+
+	assertExecutionCountEqual(t, txExec, 0, 1)
+	assertExecutionCountEqual(t, txExec, 1, 2)
+	assertExecutionCountEqual(t, txExec, 2, 3)
+
+	expectedDelta := accountDelta{
+		oldState: startState,
+		updatedBalances: map[string]int{
+			"A": 0,
+			"B": 10,
+			"C": 10,
+		},
+	}
+
+	assertDelta(t, &expectedDelta, delta)
+}
+
+func execute(
+	t *testing.T,
+	block types.Block,
+	startState types.AccountState,
+) (*transactionExecutor, *accountDelta, *dagExecutor) {
+	nWorkers := 5
+	txExec := newTransactionExecutor(len(block.Transactions))
+	optimisticExec := newOptimisticExecutor(&txExec, block.Transactions, startState)
+	nodes := optimisticExec.execute(nWorkers)
+
+	for _, node := range nodes {
+		assertExecutionCountEqual(t, &txExec, node.SeqId, 1)
+	}
+
+	dag := NewDependencyDag(nodes)
+	queue := newChannelProcessingQueue()
+	delta := newAccountDelta(startState)
+
+	dagExec := newDagExecutor(dag, &queue, &txExec, delta)
+	dagExec.execute(nWorkers)
+
+	return &txExec, delta, &dagExec
+}
+
+func assertDelta(t *testing.T, expected, actual *accountDelta) {
+	if actual.String() != expected.String() {
+		t.Fatalf(`expected updated startState "%s" but got "%s"`, expected.String(), actual.String())
 	}
 }
 
