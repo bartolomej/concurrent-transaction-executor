@@ -92,6 +92,41 @@ func TestReExecutions_IncrementallyDependantNodes(t *testing.T) {
 	assertDelta(t, &expectedDelta, delta)
 }
 
+func TestReExecutions_InDependantNodes(t *testing.T) {
+	startState := testAccountState{
+		types.AccountValue{Name: "A", Balance: 10},
+		types.AccountValue{Name: "B", Balance: 10},
+		types.AccountValue{Name: "C", Balance: 10},
+		types.AccountValue{Name: "D", Balance: 0},
+	}
+
+	block := types.Block{
+		Transactions: []types.Transaction{
+			transactions.Transfer{From: "A", To: "D", Value: 10},
+			transactions.Transfer{From: "B", To: "D", Value: 10},
+			transactions.Transfer{From: "C", To: "D", Value: 10},
+		},
+	}
+
+	txExec, delta, _ := execute(t, block, startState)
+
+	assertExecutionCountEqual(t, txExec, 0, 1)
+	assertExecutionCountEqual(t, txExec, 1, 1)
+	assertExecutionCountEqual(t, txExec, 2, 1)
+
+	expectedDelta := accountDelta{
+		oldState: startState,
+		updatedBalances: map[string]int{
+			"A": 0,
+			"B": 0,
+			"C": 0,
+			"D": 30,
+		},
+	}
+
+	assertDelta(t, &expectedDelta, delta)
+}
+
 func execute(
 	t *testing.T,
 	block types.Block,
